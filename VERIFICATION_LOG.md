@@ -97,3 +97,25 @@
 - **Registry:** CAP-055-owner-kill-switch: REQUIRED_NOT_BUILT → **PILOT**.
 
 **Suite:** `npm test` → 51/51 ✅ · race deterministic ✅ · restart-persistent ✅ · adversarial 15/15 ✅
+
+---
+
+## VR-2026-09-08-03 — P2 CENTRAL ACTION FIREWALL (authorization boundary)
+
+- **Claim:** every autonomous state-changing external send now passes a deterministic server-side firewall BEFORE the outbox; closed action-class set; precedence law enforced; fail-closed everywhere; composes (not replaces) CAP-055/CAP-008.
+- **Authoritative-doc inventory (declared, per evidence law):** mandated Signal docs (CLAUDE.md, SPEC.md, BUILD_PLAN.md, docs/*, .claude/ai-bridge/*, GPT_AUDIT F1–F35, PROGRESS/STATE/HANDOFF/BLOCKERS.md, standalone P2 task card) are **ABSENT from this workspace — used as NOT-AVAILABLE, not fabricated**. Contract derived from: the authorization prompt + user's earlier roadmap line (stage order + decision set) + existing proven specs.
+- **Method:** `tests/p2firewall.test.js` (16 blocks incl. bypass static-scan, replay, concurrency twin, injection, kill composition, audit-chain integrity, privacy, fail-closed internals, restart idempotency) + live drill `evidence/p2-firewall-live-drill.txt` (ALLOW→KILL-DENY→resume-ALLOW with traceId-linked KILL_SEND_BLOCKED).
+- **Results:** suite **67/67 PASS** via new deterministic sequential runner (node20 multi-file IPC race workaround). Live: baseline `FIREWALL_DECISION ALLOW ALL_STAGES_PASS class=MSG.AI_TEXT` (phone masked) → owner STOP → `DENY/KILL/KILL_SWITCH_ACTIVE` + `EVENT_FAILED` (nothing queued — no zombie) → RESUME → ALLOW; deliveries exactly [deliver, silence, deliver].
+- **AI-audit checkpoint — HONEST SUBSTITUTE (labeled):** .claude/ai-bridge absent ⇒ same-session independent inspection of the full `git diff main` instead (NOT a fresh-context external auditor — limitation). Findings:
+  - AF-1 **FIXED** — outbox.enqueue dropped unknown meta keys (firewall decision lost on jobs) → `...meta` preserved.
+  - AF-2 **FIXED** — `AI_SYSTEM_ACK` was allowed when the conversation didn't even exist → window-only rule (any ack outside a true ESCALATION_PENDING window now DENY + audit).
+  - AF-3 **ACCEPTED** — test-runner multi-file IPC flakiness (node v20.20.2) → sequential runner; suppressed flakiness, root cause in runner not product.
+  - AF-4 **ACCEPTED** — per-send kill state file read (pilot scale fine; revisit with SQLite migration trigger rule).
+  - AF-5 **ACCEPTED** — legacy setSendGuard/setKillGate now post-ALLOW shims; can never double-audit (firewall denies first on stopped; guards audit only on block-on-allow-path).
+  - AF-6 **DEFERRED → DEBT-20** — scheduler owner-brief tags source AI (semantic mismatch with MSG.SYSTEM_ALERT; behaviorally identical today — both autonomous).
+  - AF-7 **ACCEPTED** — ESCALATE decision type wired but unused by current class set (spec-documented, not invented into use).
+  - AF-8 **FIXED(retro)** — drill scripts signed webhooks with an awk field bug (`$3`→empty) making earlier cap055 live customer-message legs invalid (posts were WEBHOOK_FORGED-rejected — kill endpoints unaffected); re-run with fixed signing: real baseline delivery + real silence + restart persistence (`evidence/cap055-live-drill-v2.txt`).
+- **Result:** PASS (sandbox grade). Ceiling: **PILOT**.
+- **Limitations:** single-instance only; decision point = enqueue (+ kill re-check at execution); direct outbox.enqueue callers outside whatsapp.js are proven absent by static scan TODAY (hostile future code is a review matter, declared NOT-PROOFABLE by tests); UNKNOWN lives at provider boundary as before.
+
+**Suite:** `npm test` → 67/67 ✅ (5 files, sequential deterministic runner) · adversarial incl. injection/replay/race ✅ · live firewall drill ✅

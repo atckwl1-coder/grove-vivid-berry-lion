@@ -1,0 +1,59 @@
+════════ CAP-055 LIVE DRILL RE-RUN (fixed webhook signing) 2026-09-08T07:31:38+00:00 ════════
+════ CAP-055 LIVE DRILL 2026-09-08T07:31:38+00:00 — PHASE 1 (stop + silence) ════
+── 1. baseline: customer asks EMI (autonomous reply expected) ──
+    webhook HTTP 200
+    audit OUTBOX_SENT count now: 1
+── 2. OWNER authenticated STOP ALL ──
+    {
+        "ok": true,
+        "status": "STOPPED",
+        "state": "AUTOMATION_STOPPED"
+    }
+── 3. kill file on disk:
+    {
+      "state": "AUTOMATION_STOPPED",
+      "stopped_at": "2026-09-08T07:31:40.984Z",
+      "stopped_by": "boss",
+      "reason": "live drill: verify brake",
+      "resumed_at": null,
+      "resumed_by": null,
+      "applied_actions": [
+        "act-drill-stop-live-1"
+      ],
+      "updatedAt": "2026-09-08T07:31:40.984Z",
+      "source": "disk"
+    }── 4. customer msg AFTER stop → autonomy must be silent ──
+    webhook HTTP 200
+── 5. staff (hassan) tries STOP → expect 403 KILL_SWITCH_DENIED ──
+    hassan STOP → HTTP 403
+── 6. anonymous STATUS attempt → expect 401 ──
+    anon status → HTTP 401
+PHASE 1 DONE — server stays STOPPED; next: hard restart, then PHASE 2.
+── 4b. silence proof: KILL_SEND_BLOCKED=1 · post-stop FIREWALL DENY:
+    {"traceId": "fw-470340c87eff", "decision": "DENY", "stage": "KILL", "reason": "KILL_SWITCH_ACTIVE", "to": "9230****999", "class": "MSG.AI_TEXT"}
+    EVENT_FAILED: 1 · customer deliveries post-stop: none (see server log)
+════ PHASE 2 2026-09-08T07:32:02+00:00 — persistence after REAL process death + resume ════
+── 7. state after process restart (disk truth):
+    {
+      "state": "AUTOMATION_STOPPED",
+      "stopped_at": "2026-09-08T07:31:40.984Z",
+      "stopped_by": "boss",
+── 8. customer msg after restart → STILL silent? ──
+    webhook HTTP 200
+    KILL_SEND_BLOCKED total: 2
+── 9. OWNER RESUME with confirm phrase ──
+    {
+        "ok": true,
+        "status": "RESUMED",
+        "state": "AUTOMATION_ACTIVE"
+    }
+── 10. blocked-while-stopped retries now drain? (OUTBOX_SENT count now: 1) ──
+    webhook HTTP 200
+── 11. CAP-055 audit chain ──
+  07:31:33 KILL_SWITCH_GENESIS_ACTIVE actor=-        None→AUTOMATION_ACTIVE action=-
+  07:31:40 KILL_SWITCH_STOPPED        actor=boss     AUTOMATION_ACTIVE→AUTOMATION_STOPPED action=act-drill-stop-live-1
+  07:31:41 KILL_SEND_BLOCKED          actor=-        None→None action=-
+  07:31:43 KILL_SWITCH_DENIED         actor=hassan   None→None action=None
+  07:32:02 KILL_SEND_BLOCKED          actor=-        None→None action=-
+  07:32:04 KILL_SWITCH_RESUMED        actor=boss     AUTOMATION_STOPPED→AUTOMATION_ACTIVE action=act-drill-resume-live-1
+── 10b. post-resume delivery check: OUTBOX_SENT=2 (1 baseline + 1 post-resume → 2 expected)

@@ -6,6 +6,7 @@ import axios from 'axios';
 import { config, isLive } from '../config.js';
 import { log } from '../utils/logger.js';
 import { redact } from '../sentinel/audit.js';
+import * as firewall from '../sentinel/firewall.js'; // P2: static wiring — no config can disable the boundary
 
 const apiUrl = () => `https://graph.facebook.com/${config.graphVersion}/${config.phoneNumberId}/messages`;
 const headers = () => ({
@@ -47,19 +48,29 @@ export function setKillGate(fn) { killGate = fn; } // kept for CAP-055 wiring co
 // ── The ONLY send path in the whole system ──
 async function send(payload, meta = { source: 'AI' }) {
   if (!outbox) throw new Error('Sentinel: outbound dispatcher not initialized');
-  if (killGate) {
-    const g = killGate(payload?.to, meta);
-    if (!g.ok) { const e = new Error(g.reason); e.code = g.reason; throw e; }
+  // ▓▓ P2 FIREWALL — every send evaluates HERE, before anything is queued ▓▓
+  const decision = firewall.evaluate({
+    class: meta.class,
+    source: meta.source,
+    toPhone: payload?.to,
+    tenant: meta.tenant,
+    actor: meta.actor || (meta.staffId ? { staffId: meta.staffId, role: meta.role } : undefined),
+    actionId: meta.actionId,
+    evidence: meta.evidence,
+  });
+  if (decision.decision !== 'ALLOW') {
+    const e = new Error(decision.reason);
+    e.code = decision.reason;
+    e.firewall = decision;
+    throw e;
   }
-  if (sendGuard) {
-    const g = sendGuard(payload?.to, meta);
-    if (!g.ok) {
-      const e = new Error(g.reason || 'SEND_BLOCKED_BY_POLICY');
-      e.code = g.reason || 'SEND_BLOCKED_BY_POLICY';
-      throw e;
+  for (const extra of [killGate, sendGuard]) { // post-ALLOW defensive shims (legacy wiring)
+    if (extra) {
+      const g = extra(payload?.to, meta);
+      if (!g.ok) { const e = new Error(g.reason || 'SEND_BLOCKED_BY_POLICY'); e.code = g.reason || 'SEND_BLOCKED_BY_POLICY'; throw e; }
     }
   }
-  const job = outbox.enqueue(payload, meta);
+  const job = outbox.enqueue(payload, { ...meta, firewall: { decision: decision.decision, reason: decision.reason, traceId: decision.traceId } });
   if (messageLogger && payload?.type === 'text') {
     try { messageLogger(payload.to, payload.text?.body, meta); } catch { /* logger must never break send path */ }
   }
