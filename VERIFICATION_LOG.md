@@ -121,3 +121,17 @@
 - **Limitations:** single-instance only; decision point = enqueue (+ kill re-check at execution); direct outbox.enqueue callers outside whatsapp.js are proven absent by static scan TODAY (hostile future code is a review matter, declared NOT-PROOFABLE by tests); UNKNOWN lives at provider boundary as before.
 
 **Suite:** `npm test` → 67/67 ✅ (5 files, sequential deterministic runner) · adversarial incl. injection/replay/race ✅ · live firewall drill ✅
+
+---
+
+## VR-2026-09-08-04 — P2 AUDIT-INTEGRITY REMEDIATION (governance gap closure; NO product change)
+
+- **Trigger:** user's audit-integrity directive — the P2 report's audit checkpoint was honestly labeled a same-session substitute; that is NOT the mandated fresh-context audit.
+- **Inspection results (commands + outputs recorded in GPT_AUDIT.md §A):** `.claude/ai-bridge/` absent from working tree AND all 8 commits; `AUDIT_PROTOCOL.md` never existed; **F1–F35 never existed in this workspace** (`git grep` over full history → only my own absence-declarations); no auditor-dispatch mechanism exists.
+- **Truth ruling:** audit checkpoint for P2 (and all shipped capabilities) = **BLOCKED — NOT PROVEN (external-audit dimension)**, not retroactively "passed". Implementation-side verification remains valid on its own merits.
+- **CAP-055 AF-10 regression verification (mandated):** `git show 4abc296 --stat` → test-file only (6+/4−); `git diff` src/ across the merge → empty (zero product-code change); race rule proven intact in source (`HELD_KILLSWITCH` gate + onKill hooks unchanged); targeted `cap055` 4/4 clean (14/14 each); full suite 5/5 clean (67/67); kill semantics + hold/resume semantics unchanged — **the AF-10 change is test-determinism-only (PROVEN)**. EXPECTED/ACTUAL embedded above. **Proves:** no behavior delta from AF-10. **Does NOT prove:** anything about Meta-real execution (demo transport remains).
+- **P2 implementation re-inspection (bounded, no rebuild):** centralized enforcement (static call in whatsapp.send — W1 scan), no bypass transport, CAP-055 composition, closed classes, precedence, fail-closed, CAP-008 authz reuse, evidence gate, idempotency replay-deny, audit provenance w/ traceId, UNKNOWN preserved at provider boundary, concurrency (claim O_EXCL), restart (disk markers) — all as previously verified; suite re-run green post-merge.
+- **Deliverables:** GPT_AUDIT.md (real ledger; dispositions preserved append-only; audit-gate table), BLOCKERS.md (B-1 exact unblock), PROGRESS.md, STATE.md, HANDOFF.md (compact pointers — created only now, because the directive explicitly required them; before this, governance lived in VR+registry and that remains authoritative).
+- **Result:** REMEDIATION COMPLETE for documentation; AUDIT GATE stays OPEN until real auditor infrastructure exists. P2 status: **PILOT (audit-gate blocked)** — unchanged, not promoted, not demoted.
+
+**Suite:** `npm test` → 67/67 ✅ (5 of 5 clean runs this cycle) · cap055 targeted 4/4 ✅ · zero product diff ✅
