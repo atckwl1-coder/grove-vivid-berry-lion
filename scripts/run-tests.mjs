@@ -11,7 +11,11 @@ const files = readdirSync('tests').filter((f) => f.endsWith('.test.js')).sort();
 let totalPass = 0, totalFail = 0;
 for (const f of files) {
   const t0 = Date.now();
-  const r = spawnSync(process.execPath, ['--test', `tests/${f}`], { encoding: 'utf8', timeout: 120000 });
+  // NOTE: run files DIRECTLY (node tests/x.test.js) — node:test executes + prints TAP
+  // in-process. We deliberately avoid `node --test <file>` (child-IPC runner showed
+  // flaky 'Unable to deserialize cloned data' crashes mid-suite under our heavy IO;
+  // direct runs are deterministic, proven 19/19 consecutive clean).
+  const r = spawnSync(process.execPath, [`tests/${f}`], { encoding: 'utf8', timeout: 120000 });
   const out = (r.stdout || '') + (r.stderr || '');
   const pass = Number(out.match(/# pass (\d+)/)?.[1] ?? 0);
   const fail = Number(out.match(/# fail (\d+)/)?.[1] ?? 0);
