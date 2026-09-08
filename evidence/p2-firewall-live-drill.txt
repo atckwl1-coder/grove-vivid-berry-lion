@@ -1,0 +1,30 @@
+════ P2 FIREWALL LIVE DRILL 2026-09-08T07:31:07+00:00 ════
+── 1. baseline autonomous AI reply (firewall should ALLOW) ──
+    webhook 200
+    FIREWALL_DECISION rows: 1
+    {"traceId": "fw-1b6df684fd09", "decision": "ALLOW", "stage": "EXECUTION", "reason": "ALL_STAGES_PASS", "class": "MSG.AI_TEXT", "to": "9230****888"}
+── 2. OWNER STOP → autonomous must DENY at the firewall wall ──
+    {
+        "ok": true,
+        "status": "STOPPED",
+        "state": "AUTOMATION_STOPPED"
+    }
+    webhook 200
+    DENY rows with reason KILL_SWITCH_ACTIVE:
+    {"traceId": "fw-7c15b353ed6e", "decision": "DENY", "stage": "KILL", "reason": "KILL_SWITCH_ACTIVE", "to": "9230****888", "class": "MSG.AI_TEXT"}
+    (server log above may ALSO show EVENT_FAILED — send refused at enqueue)
+── 3. RESUME (typed confirm) → autonomy returns ──
+    {
+        "ok": true,
+        "status": "RESUMED",
+        "state": "AUTOMATION_ACTIVE"
+    }
+    webhook 200
+    tail audit (last 4 decision-relevant rows):
+    07:31:09 KILL_SWITCH_STOPPED  {"actor": {"staffId": "boss", "role": "OWNER"}, "actionId": "act-p2drill-stop-1", "prev_state": "AUTOMATION_AC
+    07:31:09 KILL_SEND_BLOCKED    {"reason": "blocked_source:AI", "class": "MSG.AI_TEXT", "traceId": "fw-7c15b353ed6e"}
+    07:31:09 FIREWALL_DECISION    {"traceId": "fw-7c15b353ed6e", "decision": "DENY", "stage": "KILL", "reason": "KILL_SWITCH_ACTIVE", "to": "923
+    07:31:09 EVENT_FAILED         {"id": "wamid.fw-2", "error": "KILL_SWITCH_ACTIVE"}
+    07:31:11 KILL_SWITCH_RESUMED  {"actor": {"staffId": "boss", "role": "OWNER"}, "actionId": "act-p2drill-resume-1", "prev_state": "AUTOMATION_
+    07:31:11 FIREWALL_DECISION    {"traceId": "fw-9e2c447ea623", "decision": "ALLOW", "stage": "EXECUTION", "reason": "ALL_STAGES_PASS", "class"
+════ DRILL COMPLETE ════

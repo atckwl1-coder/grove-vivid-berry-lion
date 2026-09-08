@@ -290,13 +290,19 @@ export function authorizeOutbound(toPhone, meta = {}) {
   // Consent acknowledgements are a legal duty — never blocked (fixed code paths only).
   if (meta.source === 'CONSENT_ACK') return { ok: true };
   const conv = load(toPhone, null);
+  // Escalation-ack discipline (CAP-008 §5): the ack source is legal ONLY inside the
+  // transient ESCALATION_PENDING window of an EXISTING conversation. No window, no ack.
+  if (meta.source === 'AI_SYSTEM_ACK') {
+    if (conv?.state === S.ESCALATION_PENDING) return { ok: true };
+    audit('AI_SEND_BLOCKED_HUMAN_ACTIVE', { tenant: conv?.tenant, conversation: conv?.id, prev_state: conv?.state, new_state: conv?.state, reason: 'blocked_source:AI_SYSTEM_ACK_outside_window' });
+    return { ok: false, reason: 'AI_SEND_BLOCKED_USE_ACK_SOURCE', state: conv?.state || 'NONE' };
+  }
   if (!conv || !SUPPRESSED.has(conv.state)) {
     if (meta.source === 'AI' && conv?.state === S.ESCALATION_PENDING) {
       return { ok: false, reason: 'AI_SEND_BLOCKED_USE_ACK_SOURCE', state: conv.state };
     }
     return { ok: true };
   }
-  if (meta.source === 'AI_SYSTEM_ACK' && conv.state === S.ESCALATION_PENDING) return { ok: true };
   if (meta.source === 'HUMAN' && conv.claimedBy && meta.staffId === conv.claimedBy) return { ok: true };
   audit('AI_SEND_BLOCKED_HUMAN_ACTIVE', { tenant: conv.tenant, conversation: conv.id, prev_state: conv.state, new_state: conv.state, reason: `blocked_source:${meta.source || 'UNTAGGED'}` });
   return { ok: false, reason: 'AI_SEND_BLOCKED_HUMAN_ACTIVE', state: conv.state };

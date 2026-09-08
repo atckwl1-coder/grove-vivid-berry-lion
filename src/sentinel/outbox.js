@@ -35,7 +35,8 @@ export function createOutbox({
     const job = {
       id, idempotencyKey: id, status: 'QUEUED', attempts: 0,
       nextAttemptAt: Date.now(), createdAt: new Date().toISOString(), payload,
-      meta: { source: meta.source || 'AI', staffId: meta.staffId || null, actionId: meta.actionId || null, conversation: meta.conversation || null },
+      meta: { ...meta, source: meta.source || 'AI', staffId: meta.staffId || null, actionId: meta.actionId || null, conversation: meta.conversation || null },
+      // ^ extra fields preserved — P2 firewall decision (traceId/decision) rides along
     };
     atomicWriteJson(path.join(Q, `${id}.json`), job);
     auditFn('OUTBOX_QUEUED', { id, to: payload?.to, msgType: payload?.type, source: job.meta.source, staffId: job.meta.staffId, actionId: job.meta.actionId });
