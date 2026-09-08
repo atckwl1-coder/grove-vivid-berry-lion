@@ -115,6 +115,8 @@
   - AF-6 **DEFERRED → DEBT-20** — scheduler owner-brief tags source AI (semantic mismatch with MSG.SYSTEM_ALERT; behaviorally identical today — both autonomous).
   - AF-7 **ACCEPTED** — ESCALATE decision type wired but unused by current class set (spec-documented, not invented into use).
   - AF-8 **FIXED(retro)** — drill scripts signed webhooks with an awk field bug (`$3`→empty) making earlier cap055 live customer-message legs invalid (posts were WEBHOOK_FORGED-rejected — kill endpoints unaffected); re-run with fixed signing: real baseline delivery + real silence + restart persistence (`evidence/cap055-live-drill-v2.txt`).
+  - AF-9 **ACCEPTED** — node test-runner multi-file AND single-file child-IPC corruption under load; suites now run in-process per file via scripts/run-tests.mjs.
+  - AF-10 **FIXED (during post-merge replay re-verification)** — KS6/KS15 race test was itself racy (HTTP stop roundtrip vs 15ms poll tick; ~1/9 flake). Reconstructed deterministically: sync `enqueue + stopAll` in one event-loop turn = structurally no tick between. Verified: 12/12 consecutive clean full-suite runs post-fix. This replay cycle also re-confirmed merged main stays green and caught the flake honestly (replay re-verification policy paid off).
 - **Result:** PASS (sandbox grade). Ceiling: **PILOT**.
 - **Limitations:** single-instance only; decision point = enqueue (+ kill re-check at execution); direct outbox.enqueue callers outside whatsapp.js are proven absent by static scan TODAY (hostile future code is a review matter, declared NOT-PROOFABLE by tests); UNKNOWN lives at provider boundary as before.
 
