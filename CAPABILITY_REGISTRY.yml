@@ -1,0 +1,328 @@
+# ═══════════════════════════════════════════════════════════════
+# PROJECT SENTINEL — CAPABILITY REGISTRY (machine-readable)
+# Sentinel Law §6/§11/§33/§34 enforcement artifact.
+# RULE: A capability whose contract is INCOMPLETE may never
+#       enter production implementation.
+# RULE: autonomy_level may never be raised without owner sign-off
+#       recorded in change_log.
+# last_audited: 2026-09-05 · registry_owner: store_owner
+# ═══════════════════════════════════════════════════════════════
+
+meta:
+  system: "Sentinel / NOOR — OPPO Experience Store Khanewal"
+  evidence_grades: {A: directly_verified, B: deterministically_derived, C: estimated_inferred, D: unavailable}
+  autonomy_levels: {L0: read_only, L1: interpret, L2: compute, L3: recommend, L4: execute_under_policy, L5: sensitive_requires_approval}
+  statuses: [VERIFIED_PRODUCTION, CONDITIONAL_PRODUCTION, PILOT, PROTOTYPE, BLOCKED, REDESIGN_REQUIRED, NOT_PROVEN]
+
+# ─── TIER-1 FULL CONTRACTS (§6 schema) — Phase 2/3 candidates ───
+
+capabilities:
+
+  CAP-001-verified-event-ingestion:
+    claim: "Every Meta webhook is authenticated, deduplicated, and durably logged BEFORE any processing."
+    purpose: "Foundation of all trust; kills duplicate-reply and spoofing (DEBT-02/03/05)."
+    inputs:
+      - {field: "X-Hub-Signature-256", source: meta_webhook_header, authority: meta_hmac_with_app_secret, freshness: per_request}
+      - {field: "message.wamid", source: meta_webhook_payload, authority: meta, freshness: per_request}
+    processing: {type: rule_engine, algorithm: "HMAC-SHA256 compare + seen-set", deterministic: true, model: none, version: n/a}
+    output: {type: "event_envelope{VERIFIED|FAILED|DUPLICATE}", evidence_grade: A}
+    permissions: {can_read: [webhook_payload], can_infer: [], can_recommend: [], can_execute: [log_event], human_approval_required: false}
+    failure_states:
+      insufficient_data: "REJECT 400, log"
+      authentication_failure: "REJECT 403, alert owner, never process"
+      provider_failure: "n/a (we are receiver)"
+      timeout: "n/a"
+      model_uncertainty: "n/a"
+    verification:
+      method: "attack suite: replay same webhook 10x → 1 effect; forged signature → rejected; LIVE boot without secret → refused"
+      acceptance_criteria: "0/10 duplicates; 100% forged rejected; boot gate proven"
+      reproducibility: "jest integration, any machine"
+    production_status: PILOT   # VR-2026-09-06-01: 5/5 attack+happy-path proofs green; real Meta traffic pending (Phase-5)
+    autonomy_level: L4
+    risk_level: LOW
+    last_verification_date: "2026-09-06"
+    verification_record: VERIFICATION_LOG.md#VR-2026-09-06-01
+
+  CAP-002-consent-ledger:
+    claim: "Marketing only to provable opt-ins; opt-out instant and permanent."
+    purpose: "Anti-ban root control + legal proof of consent."
+    inputs:
+      - {field: consent_event, source: "qr_scan | ctwa_ad | receipt_capture | keyword+confirm", authority: first_party_db, freshness: at_write}
+    processing: {type: rule_engine, algorithm: "append-only ledger {who,when,source,proof}", deterministic: true, model: none, version: n/a}
+    output: {type: consent_state, evidence_grade: A}
+    permissions: {can_read: [phone_consent], can_infer: [], can_recommend: [], can_execute: [grant_consent, revoke_consent], human_approval_required: false}
+    failure_states:
+      conflicting_data: "most recent REVOKE always wins"
+      provider_failure: "ledger is local-first"
+    verification:
+      method: "replay ledger → reconstruct every consent; deletion test → proof survives record deletion"
+      acceptance_criteria: "0 sends to non-ledger numbers in any test; revoke latency <1s"
+      reproducibility: deterministic
+    production_status: PROTOTYPE   # keyword consent exists; confirm-step + QR/receipt capture missing (TB-4)
+    autonomy_level: L4
+    risk_level: HIGH_IF_WRONG
+    last_verification_date: null
+
+  CAP-003-catalog-serving:
+    claim: "Prices/specs/stock shown are exactly the owner-approved file, always dated, never AI-invented."
+    purpose: "Price truth in a price-sensitive market."
+    inputs:
+      - {field: products.json, source: owner_file, authority: owner, freshness: "TTL 24h then STALE"}
+    processing: {type: "schema_validate + sanity_bounds(±25%) + freshness", deterministic: true, model: none, version: schema_v1}
+    output: {type: "price_card + evidence{observed_at,status:VERIFIED|STALE}", evidence_grade: "B (owner-file-derived)"}
+    permissions: {can_read: [products_file], can_infer: [], can_recommend: [], can_execute: [display_price], human_approval_required: "on >25% price jump in file edit"}
+    failure_states:
+      stale_data: "reply: 'rates kal ke ho sakte hain — confirm karein'; scarcity counters auto-disabled"
+      conflicting_data: "owner file wins over LLM memory ALWAYS"
+      provider_failure: "file unreadable → honest 'rates par kaam jaari hai' + handoff; never last-good-as-current (§27)"
+    verification:
+      method: "fuzz file: bad schema rejected; stale file → STALE badge present"
+      acceptance_criteria: "0 undated prices in any output"
+      reproducibility: jest
+    production_status: PROTOTYPE
+    autonomy_level: L2
+    risk_level: MEDIUM
+    last_verification_date: null
+
+  CAP-004-emi-calculator:
+    claim: "Installment math exact, consistent, fully disclosed."
+    purpose: "Sell on installments with transparent totals."
+    inputs: [{field: "principal, months, policy_rate", source: "products.json + store_policy", authority: owner, freshness: versioned}]
+    processing: {type: arithmetic, algorithm: "total = P(1+r·m); monthly = round(total/m)", deterministic: true, model: none, version: emi_v1}
+    output: {type: emi_table, evidence_grade: B}
+    permissions: {can_read: [prices, policy], can_infer: [], can_recommend: [plans], can_execute: [], human_approval_required: false}
+    failure_states: {insufficient_data: "ask model/amount", conflicting_data: "policy file wins"}
+    verification:
+      method: "unit tests vs hand-calc spreadsheet"
+      acceptance_criteria: "100% match; total payable ALWAYS displayed; labeled 'store installment plan' (never implies bank finance)"
+      reproducibility: jest
+    production_status: PROTOTYPE   # demo-verified; disclosure wording required
+    autonomy_level: L2
+    risk_level: MEDIUM_IF_MISLABELED
+    last_verification_date: null
+
+  CAP-005-tradein-table-quote:
+    claim: "Exchange value is 'andazan' from owner table; never binding; physical check prevails."
+    purpose: "Footfall-driving trade-in offers with honest wording."
+    inputs: [{field: "model_query, condition", source: customer_text, authority: owner_table, freshness: versioned}]
+    processing: {type: table_lookup, algorithm: "match row → condition column → value", deterministic: true, model: none, version: ti_v1}
+    output: {type: "estimate{value, label:ESTIMATED}", evidence_grade: B}
+    permissions: {can_read: [tradein_table], can_infer: [], can_recommend: [value], can_execute: [], human_approval_required: "final binding value = staff only"}
+    failure_states: {insufficient_data: "ask model/condition or photo flow"}
+    verification:
+      method: "unit tests + wording lint: every output carries 'andazan'/ESTIMATED"
+      acceptance_criteria: "0 binding-worded estimates"
+      reproducibility: jest
+    production_status: PROTOTYPE   # demo-verified incl. wording ✅
+    autonomy_level: L2
+    risk_level: LOW
+    last_verification_date: null
+
+  CAP-006-reservation-stock-lock:
+    claim: "Reservations are REAL: atomic stock decrement + durable record + 24h expiry release."
+    purpose: "Reserve & pickup that never lies (fixes DEBT-01)."
+    inputs:
+      - {field: stock_count, source: products.json, authority: owner_file, freshness: transactional}
+      - {field: customer_phone, source: webhook, authority: meta_sender_id, freshness: per_event}
+    processing: {type: "transaction{UPDATE stock WHERE stock>0 atomic; INSERT reservation{token,expires_at}}", deterministic: true, model: none, version: res_v1}
+    output: {type: "reservation_token | OUT_OF_STOCK_honest", evidence_grade: B}
+    permissions: {can_read: [stock], can_infer: [], can_recommend: [], can_execute: [create_reservation], human_approval_required: false}
+    failure_states:
+      conflicting_data: "atomic write; concurrent losers → honest waitlist offer"
+      provider_failure: "no token unless DB commit confirmed FIRST"
+      timeout: "EXECUTION_RESULT_UNKNOWN → never re-issue duplicate token"
+    verification:
+      method: "chaos: 20 parallel reserves on stock=1 → exactly 1 token, 19 honest refusals; restart mid-flow → no orphan tokens; expiry cron releases stock"
+      acceptance_criteria: "0 double-reservations in 10k simulations"
+      reproducibility: "jest + chaos script"
+    production_status: REDESIGN_REQUIRED   # current code issues phantom tokens (truth violation)
+    autonomy_level: L4
+    risk_level: HIGH
+    last_verification_date: null
+
+  CAP-007-marketing-governor:
+    claim: "No marketing message leaves without 6 deterministic checks; suppression heuristic labeled ESTIMATED, internal-only."
+    purpose: "Quality-rating protection; anti-ban by design."
+    inputs: [{field: "consent, opted_out, engagement, marketing_today, hour_pkt", source: first_party_db, authority: internal, freshness: per_decision}]
+    processing: {type: rule_engine, algorithm: "6-gate AND + engagement heuristic(grade C)", deterministic: "gates yes", model: none, version: gov_v1}
+    output: {type: "decision{SEND|SUPPRESS, reasons[]}", evidence_grade: "A for gate inputs; C for heuristic"}
+    permissions: {can_read: [customer_state], can_infer: [engagement], can_recommend: [], can_execute: [block_send], human_approval_required: "any override of BLOCK"}
+    failure_states:
+      insufficient_data: "DEFAULT = SUPPRESS (fail closed)"
+      stale_data: "quality unknown → assume YELLOW → utility-only"
+    verification:
+      method: "property tests: crafted states (opt-out, quiet hour, cap hit) must ALWAYS suppress; audit-log completeness check"
+      acceptance_criteria: "100% suppression on forbidden states; full audit trail"
+      reproducibility: "jest property-based"
+    production_status: PROTOTYPE   # logic written but unwired (DEBT-09)
+    autonomy_level: L4
+    risk_level: HIGH_IF_WRONG
+    last_verification_date: null
+
+  CAP-008-human-inbox:
+    claim: "Handoff is REAL: queue, claim/lock, SLA timer, context transfer, audit, return-to-AI."
+    purpose: "Makes the zero-bug promise true (§18). Removes active STOP condition."
+    inputs: [{field: "escalation_event{reason, chat_excerpt}", source: brain, authority: internal, freshness: realtime}]
+    processing: {type: "queue + assignment + SLA clock (staff or BSP inbox)", deterministic: true, model: none, version: inbox_v1}
+    output: {type: "handoff_state{QUEUED|CLAIMED|RESOLVED|BREACHED_SLA}", evidence_grade: B}
+    permissions: {can_read: [chat_history_scoped], can_infer: [], can_recommend: [draft_replies], can_execute: [assign, lock, resolve], human_approval_required: true}
+    failure_states:
+      provider_failure: "second-channel owner alert"
+      timeout: "SLA breach → owner escalation ≤5 min"
+    verification:
+      method: "37-test suite (19 CAP-008 incl. 12 adversarial) + live drill evidence/cap008-live-drill.txt; spec CAP008_SPEC.md v2.0"
+      acceptance_criteria: "auth/authz/tenant/claim-race/suppression/send-path/audit/SLA/failure-paths ALL green — 37/37; live drill: escalate→suppress→claim→conflict→reply→resolve→return→AI live again; restart-persisted"
+      reproducibility: "npm test (tests/cap008.test.js) + curl drill script"
+    production_status: PILOT   # 2026-09-08 — sandbox-verified; NOT VERIFIED_PRODUCTION until real-WhatsApp staff pilot (Phase 5). §18 STOP condition LIFTED.
+    autonomy_level: "L5 orchestration, human in loop"
+    risk_level: CRITICAL
+    last_verification_date: "2026-09-08"
+
+  CAP-009-ai-interpreter-guarded:
+    claim: "LLM interprets intent and drafts language; it NEVER holds price/permission/policy authority."
+    purpose: "Natural Urdu/Roman/English conversation without hallucinated facts or injection breaches."
+    inputs:
+      - {field: customer_text, source: webhook, authority: untrusted, freshness: per_event}
+      - {field: catalog_snapshot, source: CAP-003, authority: owner, freshness: "≤24h"}
+    processing:
+      type: "llm_structured(JSON) → schema_validate → fact_validate(every PKR figure must ∈ catalog∪computed) → policy_validate → wording_validate"
+      deterministic: false
+      model: "pinned model+version recorded per reply (§21)"
+      version: "locked in .env + logged"
+    output: {type: "reply | HANDOFF", evidence_grade: "C for intent; A/B only for facts carried from higher-authority sources"}
+    permissions: {can_read: [catalog_snapshot, chat_excerpt], can_infer: [intent, language, sentiment_hint], can_recommend: [reply_text], can_execute: [], human_approval_required: "any commitment outside policy"}
+    failure_states:
+      model_uncertainty: "HANDOFF (fail closed)"
+      provider_failure: "rule-based FAQ fallback labeled LIMITED + handoff offer"
+      conflicting_data: "catalog wins; bad figure discarded → regenerate once → else HANDOFF"
+    verification:
+      method: "500-scenario pack (ur/roman/en) + 100-prompt injection red-team"
+      acceptance_criteria: "unsafe-action rate = 0 · wrong-price after validator = 0 · floor-breach 0/100 · unsupported-answer ≤2%"
+      reproducibility: "eval harness + fixtures (fixtures labeled MOCK)"
+    production_status: REDESIGN_REQUIRED   # price validator absent (DEBT-07)
+    autonomy_level: "L1 interpret + L3 recommend ONLY — never L4"
+    risk_level: CRITICAL
+    last_verification_date: null
+
+  CAP-010-menu-flows:
+    claim: "Deterministic menus/flows answer safely without LLM cost."
+    purpose: "Cheap instant handling of bulk traffic."
+    inputs: [{field: button_or_keyword, source: webhook, authority: meta_sender, freshness: per_event}]
+    processing: {type: state_machine, algorithm: "router.js FSM", deterministic: true, model: none, version: fsm_v1}
+    output: {type: interactive_reply, evidence_grade: B}
+    permissions: {can_read: [catalog], can_infer: [], can_recommend: [], can_execute: [send_menu], human_approval_required: false}
+    failure_states: {insufficient_data: "fall to CAP-009 → CAP-008"}
+    verification:
+      method: "FSM path tests — every button id has a handler"
+      acceptance_criteria: "0 dead-ends"
+      reproducibility: jest
+    production_status: PROTOTYPE
+    autonomy_level: L4
+    risk_level: LOW
+    last_verification_date: null
+
+  CAP-011-outbound-dispatcher:
+    claim: "Every outbound message is queued, retried, 24h-window-checked, audit-logged; unknown outcomes are EXECUTION_RESULT_UNKNOWN — never fake success (§27)."
+    purpose: "Durability under Meta failures; zero lost replies."
+    inputs: [{field: outbound_job, source: internal_capabilities, authority: policy_checked_only, freshness: queued}]
+    processing: {type: "outbox + worker + exp backoff + DLQ + window gate + idempotency key", deterministic: true, model: none, version: outbox_v1}
+    output: {type: "delivery{QUEUED|SENT|DELIVERED|READ|FAILED|UNKNOWN}", evidence_grade: A}
+    permissions: {can_read: [outbox], can_infer: [], can_recommend: [], can_execute: [send_via_meta], human_approval_required: false}
+    failure_states:
+      provider_failure: "retry ×N → DLQ + owner alert"
+      timeout: "status UNKNOWN, reconcile via Meta status webhook"
+      conflicting_data: "Meta status callback is authority for DELIVERED/READ"
+    verification:
+      method: "chaos: kill worker mid-send; fake 500s; duplicate status callbacks"
+      acceptance_criteria: "0 silent losses; 0 duplicate sends on retry"
+      reproducibility: chaos tests
+    production_status: PILOT   # VR-2026-09-06-02: retry/DLQ/crash-recovery/no-double-send proven; real Meta failures pending (Phase-5)
+    autonomy_level: L4
+    risk_level: HIGH
+    last_verification_date: "2026-09-06"
+    verification_record: VERIFICATION_LOG.md#VR-2026-09-06-02
+
+  CAP-012-owner-brief:
+    claim: "Daily 9AM PKT summary = internal aggregates + live quality rating; window-aware delivery."
+    purpose: "Owner visibility without dashboard."
+    inputs:
+      - {field: aggregates, source: first_party_db, authority: internal, freshness: daily}
+      - {field: quality_rating, source: meta_api_field, authority: meta, freshness: at_send, note: "UNWIRED today"}
+    processing: {type: aggregation, algorithm: "counts + rating fetch", deterministic: true, model: none, version: brief_v1}
+    output: {type: daily_brief, evidence_grade: B}
+    permissions: {can_read: [db_aggregates, rating_field], can_infer: [], can_recommend: [], can_execute: [send_to_owner], human_approval_required: false}
+    failure_states:
+      provider_failure: "send with 'rating: UNAVAILABLE' label (§27 — real label, not fake value)"
+      window: "owner outside 24h window → hold until owner messages, or use approved utility template"
+    verification:
+      method: "1-week manual spot-check vs DB queries; window test"
+      acceptance_criteria: "counts match exactly"
+      reproducibility: "jest + manual week"
+    production_status: PROTOTYPE   # cron exists; rating unwired; window bug (DEBT-11)
+    autonomy_level: L4
+    risk_level: LOW
+    last_verification_date: null
+
+# ─── TIER-2 COMPACT REGISTRY — contracts to be COMPLETED ───
+# ─── before their build phase. Gaps are intentional.        ───
+
+registry_compact:
+  - {id: CAP-020-voice-stt-ur-pa, claim: "Transcribe Urdu/Punjabi voice notes", evidence_grade: C, autonomy: L1, production_status: NOT_PROVEN, gate: "100-note local benchmark: WER≤15%; PII redaction in logs", deps: [stt_provider, ffmpeg]}
+  - {id: CAP-021-voice-saraiki, claim: "Saraiki voice understanding", evidence_grade: D, autonomy: L0, production_status: NOT_PROVEN, gate: "no provider lists Saraiki (verified) — benchmark decides ship-or-drop", note: "PUBLIC CLAIM FORBIDDEN until gate passes; instant human fallback"}
+  - {id: CAP-022-vision-tradein, claim: "Photo → model + condition estimate", evidence_grade: C, autonomy: "L1+L3", production_status: NOT_PROVEN, gate: "n=50 AI-vs-staff grading study; output always ESTIMATED + staff confirm"}
+  - {id: CAP-023-screenshot-pricematch, claim: "OCR competitor price → human-approved match", evidence_grade: C, autonomy: L3, human_approval_required: true, production_status: PROTOTYPE_DESIGN, gate: "no automated financial commitment from screenshots ever (fraud)"}
+  - {id: CAP-024-tts-urdu-replies, claim: "Urdu spoken replies", evidence_grade: C, autonomy: L4, production_status: NOT_PROVEN, gate: "10-customer blind listening test; text always accompanies"}
+  - {id: CAP-025-pta-guided-check, claim: "Guide customer through SMS-8484 / DVS", evidence_grade: A_guidance, autonomy: L4, production_status: VALIDATED_DESIGN, note: "REDESIGNED — no PTA API exists (verified); bot never claims to query PTA"}
+  - {id: CAP-026-oppo-warranty-deeplink, claim: "IMEI → official OPPO PK warranty page + staff-assisted check", evidence_grade: B_guidance, autonomy: L4, production_status: VALIDATED_DESIGN, note: "REDESIGNED — no confirmed OPPO API; scraping forbidden"}
+  - {id: CAP-027-payment-links, claim: "Reservation advance via JazzCash/Easypaisa", evidence_grade: B_after_onboarding, autonomy: L5, production_status: BLOCKED, deps: "merchant KYC/contract NOT PROVEN until approved", gate: "sandbox + Rs.1 live txn + idempotent PSP-callback dedupe + refund policy in writing"}
+  - {id: CAP-028-inbound-calling, claim: "Customer taps → voice call to store", evidence_grade: A_capability, autonomy: L4, production_status: CONDITIONAL_PENDING_BSP, note: "voice-only (verified); PK allowed; confirm BSP support for +92"}
+  - {id: CAP-029-outbound-calling, claim: "Store calls customer", evidence_grade: A_capability, autonomy: L5, production_status: BLOCKED, note: "needs messaging tier ≥2000/24h + per-user consent (verified); NO video exists — demos = pre-recorded clips"}
+  - {id: CAP-030-festival-engine, claim: "Scheduled compliant campaigns", evidence_grade: B, autonomy: L4, production_status: PROTOTYPE_DESIGN, gate: "templates approved ≥72h early; every send via CAP-007"}
+  - {id: CAP-031-dost-referrals, claim: "Trackable bring-a-friend rewards", evidence_grade: B, autonomy: L4, production_status: PROTOTYPE_DESIGN, gate: "reward only on staff-verified sale + 7-day return window; farming tests"}
+  - {id: CAP-032-postpurchase-journeys, claim: "Day0/3/15/30/Mo-11 touches", evidence_grade: B, autonomy: L4, production_status: PROTOTYPE_DESIGN, blocks_on: "staff sale-logging habit (process dependency, documented)"}
+  - {id: CAP-033-watchlist, claim: "One alert on real price drop", evidence_grade: B, autonomy: L4, production_status: PROTOTYPE_DESIGN, gate: "fires only on owner-file change events"}
+  - {id: CAP-034-deadchat-revival, claim: "Single useful re-engagement to lapsed opt-ins", evidence_grade: "B+C", autonomy: L4, production_status: PROTOTYPE_DESIGN, gate: "through CAP-007; 90-day suppression"}
+  - {id: CAP-035-review-requests, claim: "Review ask sent EQUALLY to all buyers", evidence_grade: B, autonomy: L4, production_status: REDESIGN_DONE, note: "sentiment-gating removed — Google policy prohibits review-gating"}
+  - {id: CAP-036-staff-copilot, claim: "Draft replies + chat summaries for staff", evidence_grade: C, autonomy: L3, human_approval_required: one_tap_send, production_status: PROTOTYPE_DESIGN, gate: "staff rate ≥4/5 in blind test"}
+  - {id: CAP-037-competitor-radar, claim: "Log/summarize competitor offers quoted by customers", evidence_grade: C, autonomy: "L0/L1", production_status: PROTOTYPE_DESIGN, note: "no automated counter-offers — owner decides"}
+  - {id: CAP-038-complaint-firewall, claim: "Anger → ≤5min escalation", evidence_grade: C, autonomy: L4_routing, production_status: PROTOTYPE_DESIGN, gate: "recall ≥90% on 50-msg angry corpus; multi-signal, not keywords-only"}
+  - {id: CAP-039-negotiation-engine, claim: "Best-price offers within floor", evidence_grade: B_rules, autonomy: L4, production_status: REDESIGN_DONE, note: "deterministic engine owns numbers; LLM may ONLY phrase; validator re-checks; 100-injection red-team: 0 breaches required"}
+  - {id: CAP-040-dream-visualizer, claim: "Personalized phone card image", evidence_grade: C, autonomy: L4, production_status: PROTOTYPE_DESIGN, gate: "price = text overlay from catalog; model never paints numbers; AI-generated watermark"}
+  - {id: CAP-041-owner-voice-clone, claim: "AI thank-you notes in owner voice", evidence_grade: C, autonomy: L4, human_approval_required: launch, production_status: NOT_PROVEN, gate: "written owner consent + mandatory AI disclosure + voice-model access control + legal check"}
+  - {id: CAP-042-family-graph, claim: "Household bundle selling", evidence_grade: C, autonomy: L3, production_status: PROTOTYPE_DESIGN, gate: "invite-only explicit linking; any member can exit; no inferred ties"}
+  - {id: CAP-043-zerowaste-targeting, claim: "Re-contact past interested chatters for slow stock", evidence_grade: "B+C", autonomy: L4, production_status: PROTOTYPE_DESIGN, gate: "through CAP-007 only"}
+  - {id: CAP-044-birthday-winback, claim: "DOB-based offers", evidence_grade: B, autonomy: L4, production_status: PROTOTYPE_DESIGN, gate: "explicit consented DOB with stated purpose"}
+  - {id: CAP-045-segment-of-one, claim: "Deep-personalized campaigns", evidence_grade: C, autonomy: L4, production_status: PROTOTYPE_DESIGN, gate: "opt-out delta ≤ generic in A/B; owner creepiness review"}
+  - {id: CAP-046-phone-doctor, claim: "Fault triage + likely cause + book slot", evidence_grade: C, autonomy: "L1+L3", production_status: PROTOTYPE_DESIGN, gate: "30-case technician review; wording always 'likely'; quotes are ranges"}
+  - {id: CAP-047-lost-phone-guidance, claim: "Official steps content (PTA 8484/carrier)", evidence_grade: A_content, autonomy: L4, production_status: VALIDATED_DESIGN, note: "guidance only — we never claim to block IMEIs"}
+  - {id: CAP-048-free-service-days, claim: "Slot booking for free services", evidence_grade: B, autonomy: L4, production_status: PROTOTYPE_DESIGN}
+  - {id: CAP-049-visit-tokens, claim: "Store visit slots, no-queue", evidence_grade: B, autonomy: L4, production_status: PROTOTYPE_DESIGN, gate: "slots/hour cap; double-booking test"}
+  - {id: CAP-050-honest-scarcity, claim: "'2 left' counters", evidence_grade: B, autonomy: L4, production_status: PROTOTYPE_DESIGN, gate: "auto-disabled when stock STALE (§28)"}
+  - {id: CAP-051-bundle-brain, claim: "Margin-safe bundles", evidence_grade: C, autonomy: L3, production_status: PROTOTYPE_DESIGN, gate: "unit tests: every generated bundle ≥ floor margin"}
+  - {id: CAP-052-community-calendar, claim: "Local event-driven offers", evidence_grade: B, autonomy: L4, production_status: PROTOTYPE_DESIGN}
+  - {id: CAP-053-assisted-attribution, claim: "'Assisted conversions (estimated)' reporting", evidence_grade: C_labeled, autonomy: L2, production_status: REDESIGN_DONE, note: "never causal revenue claims; depends on staff sale-logging"}
+  - {id: CAP-054-quality-monitor, claim: "Hourly rating read; auto-pause marketing on YELLOW", evidence_grade: A, autonomy: L4_defensive_only, production_status: VALIDATED_DESIGN, note: "can only RESTRICT sending, never enable"}
+  - {id: CAP-055-owner-kill-switch, claim: "Authenticated STOP ALL automations", evidence_grade: B, autonomy: safety, production_status: PILOT, verified: "VR-2026-09-08-02 — 14 new tests (suite 51/51), race+restart+corruption+retry-hold proven; live drill evidence/cap055-live-drill.txt (real process death mid-stop, still stopped, owner-only resume)", gate: "spec CAP055_SPEC.md; owner web auth; NOT VERIFIED_PRODUCTION until real pilot"}
+
+# ─── RELEASE GATE P0 (§38 Phase-6) — nothing ships without all ───
+release_gate_P0:
+  - every_capability_in_scope_has_COMPLETE_contract
+  - CAP-008_staff_inbox_live_and_drilled
+  - CAP-001_idempotency_proven
+  - CAP-011_outbox_proven
+  - CAP-009_validator_proven_zero_price_zero_injection_breaches
+  - CAP-002_consent_ledger_replayable
+  - CAP-055_kill_switch_drilled
+  - evidence_labels_in_every_customer_facing_output
+  - CAP-006_reservation_atomicity_proven_or_feature_off
+  - CAP-054_quality_monitor_wired
+  - pii_redaction_in_logs
+  - automated_backup_of_ledger_and_db
+
+change_log:
+  - {date: "2026-09-05", actor: "sentinel-audit", note: "Registry created from FEASIBILITY_AUDIT.md + PHASE0_RECONSTRUCTION.md. 12 full contracts + 36 compact entries. 0 capabilities at VERIFIED_PRODUCTION."}
+  - {date: "2026-09-06", actor: "sentinel-eng", note: "PHASE 2A shipped+verified (10/10 tests, adversarial demo clean). CAP-001 & CAP-011 → PILOT. Debt closed: DEBT-02/03/05/06, partial 10/11. New structural rule learned in verification: post-send bookkeeping must never trigger resend (SENT_WITH_AUDIT_GAP state added). NEXT: Phase 2B — human inbox (CAP-008) removes the §18 STOP condition."}
+  - {date: "2026-09-07", actor: "reviewer-export", note: "Full evidence package exported + integrity-pinned (bundle sha256 6fbc21ba…). New derived docs 4-10 labeled DERIVED EXTRACTION. Independent claim audit: 4 PROVEN, 7 PARTIALLY PROVEN, 1 correction recorded."}
+  - {date: "2026-09-07", actor: "sentinel-eng", note: "PHASE 2A.1 REMEDIATION complete — VR-2026-09-07-03: suite 18/18 + live restart-replay attack clean. Closed: missing-dir idempotency defect (R1), restart-persistence (R2a+live demo), bookkeeping regression test (R2b), SIGKILL recovery (R3), full PII boundary redacted-surfaces vs sensitive-zone + 7d outbox retention (R4), terminology lint banning overclaims repo-wide (R5/R6). NEW DEBT REGISTERED [documented, deferred per scope-freeze]: DEBT-17 audit-rotation/segment headers; DEBT-18 customers-DB message text is sensitive-zone (masking surfaces done; DB access controls + retention pending CAP-008/Phase-3). Terminology: 'exactly once' phrase purged from repo; semantics are 'single delivery per accepted event / at-least-once at provider boundary'."}
+  - {date: "2026-09-08", actor: "sentinel-eng", note: "CAP-008 HUMAN FALLBACK CORE built+verified — VR-2026-09-08-01: 37/37 suite (19 new incl. 12 adversarial) + live signed-webhook drill (escalate→suppress→claim→conflict→reply-via-outbox→resolve→explicit return→AI live; restart-persisted; 5 defects found+fixed and RECORDED). CAP-008: BLOCKED→PILOT. §18 STOP lifted. New files: sentinel/auth.js (scrypt creds seeded via env, server-side sessions 12h), sentinel/conversations.js (FSM+O_EXCL atomic claim+SLA sweep+closed reason set), routes/inbox.js, inbox/views.js; chokepoint guard wired into whatsapp send path (AI cannot send to human-owned customer — server-side). DEBT-19 registered: Secure-cookie flag + login rate-limit before internet exposure. CAP-009 NOT started (awaits authorization)."}
+  - {date: "2026-09-08", actor: "sentinel-eng", note: "CAP-055 OWNER KILL SWITCH built+verified — VR-2026-09-08-02 (suite 51/51; 14 new tests incl. ALL 15 mandated adversarial cases; race rule 'stop wins at check instant' proven; corrupt-state fail-CLOSED proven). New: sentinel/killswitch.js (file-backed state, genesis ACTIVE only on first boot, actionId ledger), two walls (enqueue gate in whatsapp.send + execute gate + hold/release sweep in outbox), /inbox/kill/* routes (OWNER-only STOP/RESUME, RESUME requires typed confirm+reason), owner banner in inbox. Human (source=HUMAN) + consent-ack sends pass while stopped — enforced by actor tag, not UI. Live drill: stop→silence→hard restart→still stopped→resume→drain. STOP condition for autonomous marketing (CAP-007) partially de-risked: brake now provable. CAP-007 stays OFF (Governor still unwired). No new debts; DEBT-19 gains cookie-hardening relevance."}

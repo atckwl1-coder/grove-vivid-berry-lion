@@ -1,0 +1,61 @@
+════ CAP-055 LIVE DRILL 2026-09-08T06:42:48+00:00 — PHASE 1 (stop + silence) ════
+── 1. baseline: customer asks EMI (autonomous reply expected) ──
+    webhook HTTP 200
+    audit OUTBOX_SENT count now: 1
+── 2. OWNER authenticated STOP ALL ──
+    {
+        "ok": true,
+        "status": "STOPPED",
+        "state": "AUTOMATION_STOPPED"
+    }
+── 3. kill file on disk:
+    {
+      "state": "AUTOMATION_STOPPED",
+      "stopped_at": "2026-09-08T06:42:50.997Z",
+      "stopped_by": "boss",
+      "reason": "live drill: verify brake",
+      "resumed_at": null,
+      "resumed_by": null,
+      "applied_actions": [
+        "act-drill-stop-live-1"
+      ],
+      "updatedAt": "2026-09-08T06:42:50.997Z",
+      "source": "disk"
+    }── 4. customer msg AFTER stop → autonomy must be silent ──
+    webhook HTTP 200
+── 5. staff (hassan) tries STOP → expect 403 KILL_SWITCH_DENIED ──
+    hassan STOP → HTTP 403
+── 6. anonymous STATUS attempt → expect 401 ──
+    anon status → HTTP 401
+PHASE 1 DONE — server stays STOPPED; next: hard restart, then PHASE 2.
+── 4b. silence proof: KILL_SEND_BLOCKED audits since stop:
+1
+    EVENT_FAILED (send blocked mid-flow):
+    EVENT_FAILED KILL_SWITCH_ACTIVE
+════ PHASE 2 2026-09-08T06:43:27+00:00 — persistence after REAL process death + resume ════
+── 7. state after process restart (disk truth):
+    {
+      "state": "AUTOMATION_STOPPED",
+      "stopped_at": "2026-09-08T06:42:50.997Z",
+      "stopped_by": "boss",
+── 8. customer msg after restart → STILL silent? ──
+    webhook HTTP 200
+    KILL_SEND_BLOCKED total: 2
+── 9. OWNER RESUME with confirm phrase ──
+    {
+        "ok": true,
+        "status": "RESUMED",
+        "state": "AUTOMATION_ACTIVE"
+    }
+── 10. blocked-while-stopped retries now drain? (OUTBOX_SENT count now: 1) ──
+    webhook HTTP 200
+── 11. CAP-055 audit chain ──
+  06:42:40 KILL_SWITCH_GENESIS_ACTIVE actor=-        None→AUTOMATION_ACTIVE action=-
+  06:42:50 KILL_SWITCH_STOPPED        actor=boss     AUTOMATION_ACTIVE→AUTOMATION_STOPPED action=act-drill-stop-live-1
+  06:42:51 KILL_SEND_BLOCKED          actor=-        None→None action=-
+  06:42:53 KILL_SWITCH_DENIED         actor=hassan   None→None action=None
+  06:43:27 KILL_SEND_BLOCKED          actor=-        None→None action=-
+  06:43:29 KILL_SWITCH_RESUMED        actor=boss     AUTOMATION_STOPPED→AUTOMATION_ACTIVE action=act-drill-resume-live-1
+── 10b. post-resume autonomy restored:
+    OUTBOX_SENT final: 2
+    OUTBOX_QUEUED final: 2

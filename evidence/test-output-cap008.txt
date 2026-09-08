@@ -1,0 +1,299 @@
+
+> noor-whatsapp-bot@1.0.0 test
+> node --test tests/
+
+TAP version 13
+# ✅ CAP-008 suite file loaded — tests running sequentially (state machine is deliberately order-sensitive)
+# ── CAP-008-F0 auth
+#    EXPECTED        : 3 logins succeed, LOGIN_OK×3
+#    ACTUAL          : as expected
+#    PROVES          : scrypt verify + session issuance
+#    DOES NOT PROVE  : nothing about session expiry yet (A7 covers)
+# Subtest: setup: three staff log in (OWNER/STAFF/foreign-tenant)
+ok 1 - setup: three staff log in (OWNER/STAFF/foreign-tenant)
+  ---
+  duration_ms: 145.250608
+  ...
+# ── F1 escalation
+#    EXPECTED        : QUEUED + CUSTOMER_REQUESTED_HUMAN + WITHIN_SLA + honest ack
+#    ACTUAL          : QUEUED/CUSTOMER_REQUESTED_HUMAN/WITHIN_SLA, acks=1
+#    PROVES          : real escalation path + reason control + ack wording law
+#    DOES NOT PROVE  : LLM-driven reasons (test used deterministic menu path — intent map covered by A-suite code review)
+# Subtest: F1. customer asks for human → conversation QUEUED, ack honest, AI now silent
+ok 2 - F1. customer asks for human → conversation QUEUED, ack honest, AI now silent
+  ---
+  duration_ms: 277.60464
+  ...
+# ── A1 unauth read
+#    EXPECTED        : 401 + no data leak
+#    ACTUAL          : 401/401, leak=false
+#    PROVES          : auth gate protects reads
+#    DOES NOT PROVE  : session-fixation style attacks (not modeled)
+# Subtest: A1. unauthenticated actor opens inbox/conversation → 401, zero conversation data
+ok 3 - A1. unauthenticated actor opens inbox/conversation → 401, zero conversation data
+  ---
+  duration_ms: 10.191694
+  ...
+# ── A2 tenant isolation
+#    EXPECTED        : 404 + TENANT_DENY audited for read AND mutation
+#    ACTUAL          : 404/404, denyAudit=1
+#    PROVES          : server-side tenant scoping on read+write
+#    DOES NOT PROVE  : sub-tenant ACLs (out of scope)
+# Subtest: A2. staff from tenant-b tries khanewal conversation → 404 TENANT_DENY, nothing returned
+ok 4 - A2. staff from tenant-b tries khanewal conversation → 404 TENANT_DENY, nothing returned
+  ---
+  duration_ms: 7.476848
+  ...
+# ── F2 claim
+#    EXPECTED        : CLAIMED/by=staffA/unread=0
+#    ACTUAL          : CLAIMED/staffA/0
+#    PROVES          : claim transition + actor audit
+#    DOES NOT PROVE  : nothing about races yet (A3)
+# Subtest: F2. staffA claims → CLAIMED, assigned, unread cleared, audit CLAIMED+ASSIGNED
+ok 5 - F2. staffA claims → CLAIMED, assigned, unread cleared, audit CLAIMED+ASSIGNED
+  ---
+  duration_ms: 4.474182
+  ...
+# ── A3/A11 race+refresh
+#    EXPECTED        : 1 CLAIMED + 1 ALREADY_CLAIMED; refresh sees server truth
+#    ACTUAL          : CLAIMED / ALREADY_CLAIMED
+#    PROVES          : atomic claim (O_EXCL lock), refresh-safe ownership
+#    DOES NOT PROVE  : cross-SERVER races (single-instance deployment documented; multi-node needs Redis/DB lock — DEBT noted)
+# Subtest: A3/A11. two staff claim simultaneously → exactly one wins; refresh re-reads server state
+ok 6 - A3/A11. two staff claim simultaneously → exactly one wins; refresh re-reads server state
+  ---
+  duration_ms: 283.008188
+  ...
+# ── A4 AI suppression
+#    EXPECTED        : inbound silent + AI_SEND_BLOCKED on direct send
+#    ACTUAL          : deliveredDelta=0, blocked=AI_SEND_BLOCKED_HUMAN_ACTIVE
+#    PROVES          : INVARIANT: HUMAN-owned cannot get autonomous AI message (both walls)
+#    DOES NOT PROVE  : LLM content quality; template sends in LIVE window rules
+# Subtest: A4. customer msgs during CLAIMED → NO auto-reply; direct AI send → blocked server-side
+ok 7 - A4. customer msgs during CLAIMED → NO auto-reply; direct AI send → blocked server-side
+  ---
+  duration_ms: 308.369816
+  ...
+# ── F3 human send path
+#    EXPECTED        : outbox deliver×1, HUMAN_ACTIVE, audit w/ actor+actionId+job
+#    ACTUAL          : delivered=1 audit=1
+#    PROVES          : §7 pipeline incl. ownership-gated chokepoint
+#    DOES NOT PROVE  : WhatsApp delivery receipts (Phase-5 realtime pilot)
+# Subtest: F3. staff reply → chokepoint-authorized → outbox → delivered once → HUMAN_ACTIVE + audit
+ok 8 - F3. staff reply → chokepoint-authorized → outbox → delivered once → HUMAN_ACTIVE + audit
+  ---
+  duration_ms: 169.373651
+  ...
+# ── A10 replayed staff message
+#    EXPECTED        : ALREADY_APPLIED + delivered count unchanged
+#    ACTUAL          : status=ALREADY_APPLIED sends=1→1
+#    PROVES          : action-id idempotency on human sends
+#    DOES NOT PROVE  : client same-time double-click BEFORE first commit (~ms window; lock+sync write minimizes)
+# Subtest: A10. replayed staff message (same actionId) → ALREADY_APPLIED, no second send
+ok 9 - A10. replayed staff message (same actionId) → ALREADY_APPLIED, no second send
+  ---
+  duration_ms: 125.579778
+  ...
+# ── A5 forged/illegal transitions
+#    EXPECTED        : 409 ILLEGAL_TRANSITION ×2 (QUEUED→resolve, reply-without-claim)
+#    ACTUAL          : 409/409
+#    PROVES          : FSM legality is enforced server-side
+#    DOES NOT PROVE  : table-driven FSM completeness for future states
+# Subtest: A5. forged transition — resolve a CLAIMED chat as non-owner, and resolve-from-QUEUED
+ok 10 - A5. forged transition — resolve a CLAIMED chat as non-owner, and resolve-from-QUEUED
+  ---
+  duration_ms: 283.034184
+  ...
+# ── A8 replayed claim
+#    EXPECTED        : ALREADY_APPLIED, CLAIMED audit count stays 1
+#    ACTUAL          : ALREADY_APPLIED, audit=1
+#    PROVES          : claim idempotency
+#    DOES NOT PROVE  : replay across server restart (locks are on-disk; DIFFERENT actionId re-claim → ALREADY_CLAIMED — covered A3)
+# Subtest: A8. replayed claim request (same actionId) → ALREADY_APPLIED, state untouched
+ok 11 - A8. replayed claim request (same actionId) → ALREADY_APPLIED, state untouched
+  ---
+  duration_ms: 3.232803
+  ...
+# ── A6 forged identity
+#    EXPECTED        : 401 (no session row) + audit
+#    ACTUAL          : 401
+#    PROVES          : tokens are server-side truth; forgery has no file
+#    DOES NOT PROVE  : stolen-but-valid token misuse (12h TTL limits blast radius)
+# Subtest: A6/A1b. forged token and cookie-less mutation → 401
+ok 12 - A6/A1b. forged token and cookie-less mutation → 401
+  ---
+  duration_ms: 3.285227
+  ...
+# ── A7 expired auth
+#    EXPECTED        : 401 + session file deleted
+#    ACTUAL          : 401, exists=false
+#    PROVES          : TTL enforced server-side, fail-closed
+#    DOES NOT PROVE  : clock-skew subtleties (same-host clock only)
+# Subtest: A7. expired session → 401 SESSION_EXPIRED; mutations die
+ok 13 - A7. expired session → 401 SESSION_EXPIRED; mutations die
+  ---
+  duration_ms: 43.574412
+  ...
+# ── A9 ownership (STAFF vs other owner)
+#    EXPECTED        : NOT_OWNER 403 on foreign-owned reply; OWNER unclaim allowed+audited
+#    ACTUAL          : 403 NOT_OWNER
+#    PROVES          : reply ownership is server-side; escalate-to-owner path exists
+#    DOES NOT PROVE  : OWNER-abuse monitoring (audit trail is the mitigation)
+# Subtest: A9. staffA attempts PHONE_RACE owned by boss side if applicable / reply NOT_OWNER blocked
+ok 14 - A9. staffA attempts PHONE_RACE owned by boss side if applicable / reply NOT_OWNER blocked
+  ---
+  duration_ms: 8.614676
+  ...
+# ── F4 resolve/return loop
+#    EXPECTED        : RESOLVED→AI_ACTIVE→AI replies; resolve-replay idempotent
+#    ACTUAL          : state=AI_ACTIVE resumed=true
+#    PROVES          : full lifecycle incl. §10 explicit return
+#    DOES NOT PROVE  : implicit timeout-return exists NOWHERE in code (by design)
+# Subtest: F4. resolve → RESOLVED/SLA closed → explicit return-to-ai → AI_ACTIVE → AI answers again
+ok 15 - F4. resolve → RESOLVED/SLA closed → explicit return-to-ai → AI_ACTIVE → AI answers again
+  ---
+  duration_ms: 292.313604
+  ...
+# ── F5 real SLA
+#    EXPECTED        : BREACHED + audit + owner alert; core state intact
+#    ACTUAL          : n=1 status=BREACHED
+#    PROVES          : measurable SLA state machine (no unkept promises)
+#    DOES NOT PROVE  : court-grade timing (wall-clock + sweep interval ≈ 60s granularity)
+# Subtest: F5. SLA: aged QUEUED conversation → sweep marks BREACHED + owner alert queued via outbox
+ok 16 - F5. SLA: aged QUEUED conversation → sweep marks BREACHED + owner alert queued via outbox
+  ---
+  duration_ms: 275.97117
+  ...
+# ── F6 context transfer
+#    EXPECTED        : history[] + reason + sla fields in authenticated view
+#    ACTUAL          : msgs=2 reason=CUSTOMER_REQUESTED_HUMAN
+#    PROVES          : staff can act without reconstructing thread
+#    DOES NOT PROVE  : LLM-summarized context (not built — labelled-raw only)
+# Subtest: F6. inbox view carries labeled context: customer msgs / verified facts / AI inference labels
+ok 17 - F6. inbox view carries labeled context: customer msgs / verified facts / AI inference labels
+  ---
+  duration_ms: 2.987476
+  ...
+# ── A12 provider timeout
+#    EXPECTED        : retry×1 → delivered×1, OUTBOX_RETRY audited
+#    ACTUAL          : delivered=1 retries=1
+#    PROVES          : bounded retry policy, no silent duplicate, single audit of human intent
+#    DOES NOT PROVE  : true UNKNOWN-after-send (network meta-split) is outbox UNKNOWN_REQUEUED territory — covered by 2A crash suite, not here
+# ── A13 LLM reason control
+#    EXPECTED        : garbage → UNKNOWN + audit
+#    ACTUAL          : UNKNOWN
+#    PROVES          : backend validates against closed set (§9)
+#    DOES NOT PROVE  : deliberate reason-gaming inside the valid set (policy review layer)
+# Subtest: A12. staff send → provider timeout → bounded retry; playbook: truth, not resend-storm
+ok 18 - A12. staff send → provider timeout → bounded retry; playbook: truth, not resend-storm
+  ---
+  duration_ms: 681.405157
+  ...
+# Subtest: A13. escalate() with garbage reason → mapped to UNKNOWN, never trusted raw
+ok 19 - A13. escalate() with garbage reason → mapped to UNKNOWN, never trusted raw
+  ---
+  duration_ms: 1.244355
+  ...
+# Subtest: 1. valid signed message → single delivery per accepted event
+ok 20 - 1. valid signed message → single delivery per accepted event
+  ---
+  duration_ms: 37.155099
+  ...
+# Subtest: 2. replay attack → duplicate suppressed, no second reply
+ok 21 - 2. replay attack → duplicate suppressed, no second reply
+  ---
+  duration_ms: 160.546464
+  ...
+# [2026-09-08T03:10:05.115Z] ⚠️ ⛔ Forged/unsigned webhook rejected
+# Subtest: 3. forged signature → blocked, zero side effects
+ok 22 - 3. forged signature → blocked, zero side effects
+  ---
+  duration_ms: 105.558948
+  ...
+# [2026-09-08T03:10:05.221Z] ⚠️ ⛔ Forged/unsigned webhook rejected
+# Subtest: 4. unsigned webhook while secret configured → blocked
+ok 23 - 4. unsigned webhook while secret configured → blocked
+  ---
+  duration_ms: 105.197258
+  ...
+# Subtest: 5. Sentinent boot gate refuses LIVE without appSecret
+ok 24 - 5. Sentinent boot gate refuses LIVE without appSecret
+  ---
+  duration_ms: 0.791363
+  ...
+# Subtest: 6. outbox retries with backoff → eventually SENT, attempts recorded
+ok 25 - 6. outbox retries with backoff → eventually SENT, attempts recorded
+  ---
+  duration_ms: 84.049077
+  ...
+# Subtest: 7. outbox permanent failure → DLQ with audit trail
+ok 26 - 7. outbox permanent failure → DLQ with audit trail
+  ---
+  duration_ms: 32.698358
+  ...
+# Subtest: 8. crash mid-send → recovered as UNCERTAIN, single delivery (tested crash class)
+ok 27 - 8. crash mid-send → recovered as UNCERTAIN, single delivery (tested crash class)
+  ---
+  duration_ms: 162.988169
+  ...
+# Subtest: 9. audit trail masks phone numbers (PII)
+ok 28 - 9. audit trail masks phone numbers (PII)
+  ---
+  duration_ms: 0.996625
+  ...
+# Subtest: 10. corrupt JSON file → explicit fallback, no crash
+ok 29 - 10. corrupt JSON file → explicit fallback, no crash
+  ---
+  duration_ms: 1.363982
+  ...
+# Subtest: R1. idempotency survives missing directory (recovers, still dedupes)
+ok 30 - R1. idempotency survives missing directory (recovers, still dedupes)
+  ---
+  duration_ms: 1.884585
+  ...
+# Subtest: R2a. idempotency persists across real process restarts
+ok 31 - R2a. idempotency persists across real process restarts
+  ---
+  duration_ms: 75.794804
+  ...
+# ⚠️ Outbox bookkeeping error (job already sent, NOT retried): audit disk full
+# Subtest: R2b. bookkeeping failure AFTER successful send → no resend, honest gap state
+ok 32 - R2b. bookkeeping failure AFTER successful send → no resend, honest gap state
+  ---
+  duration_ms: 148.501685
+  ...
+# 📤 [DEMO — outbox job delivered]
+# Subtest: R3. real SIGKILL mid-send → next boot recovers job → provider touched once
+ok 33 - R3. real SIGKILL mid-send → next boot recovers job → provider touched once
+  ---
+  duration_ms: 80.045863
+  ...
+# Subtest: R4a. logger masks phone numbers
+ok 34 - R4a. logger masks phone numbers
+  ---
+  duration_ms: 0.589896
+  ...
+# Subtest: R4b. demo output masks customer phone
+ok 35 - R4b. demo output masks customer phone
+  ---
+  duration_ms: 0.373358
+  ...
+# Subtest: R4c. outbox retention: finalized jobs older than 7d purged, fresh kept
+ok 36 - R4c. outbox retention: finalized jobs older than 7d purged, fresh kept
+  ---
+  duration_ms: 0.734036
+  ...
+# Subtest: R5/R6. overclaim phrases banned from src/tests (single-delivery + tamper-EVIDENT only)
+ok 37 - R5/R6. overclaim phrases banned from src/tests (single-delivery + tamper-EVIDENT only)
+  ---
+  duration_ms: 1.557908
+  ...
+1..37
+# tests 37
+# suites 0
+# pass 37
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 4585.425029

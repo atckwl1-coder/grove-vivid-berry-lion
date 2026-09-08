@@ -1,0 +1,17 @@
+LIVE RESTART-REPLAY DEMONSTRATION — 2026-09-07T19:16-19:17Z
+Setup: wipe idempotency+audit dirs → boot server #1 (pid varies) with META_APP_SECRET set.
+
+BOOT #1: POST signed event wamid.restart-proof-1 ("emi reno13")
+  HTTP 200
+  audit: EVENT_RECEIVED → (process) → EVENT_PROCESSED → OUTBOX_SENT
+  note: DEMO outbound now masks PII: to: '9230****122' (R4 fix visible live)
+
+  >>> SERVER HARD-KILLED (stop_process SIGTERM) <<<
+
+BOOT #2: POST identical bytes, identical signature, same wamid
+  HTTP 200
+  audit tail entry: EVENT_DUPLICATE {"id":"wamid.restart-proof-1"}
+  aggregate: count(EVENT_PROCESSED for wamid.restart-proof-1 across both boots) = 1
+
+VERDICT: idempotency markers persist on disk across a real process restart;
+         replay after restart produces ZERO new side effects.

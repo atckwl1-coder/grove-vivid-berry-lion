@@ -1,0 +1,15 @@
+=== ATTACK 1: FORGED SIGNATURE ===
+HTTP 200
+=== LEGIT EVENT (valid signature) ===
+HTTP 200
+=== ATTACK 2: REPLAY (identical event, valid signature) ===
+HTTP 200
+=== AUDIT TRAIL DUMP + CHAIN CHECK ===
+2026-09-07T16:51:21.803Z BOOT {"mode":"DEMO","port":3000,"sentinel":"phase2a","signatureEnforcement":true} | prev: GENESIS
+2026-09-07T16:51:27.989Z WEBHOOK_FORGED {"hadHeader":true} | prev: 4b0a33d8fdd9
+2026-09-07T16:51:27.996Z EVENT_RECEIVED {"id":"wamid.evidence-001","from":"9230****567","type":"text"} | prev: dd325800df62
+2026-09-07T16:51:27.998Z OUTBOX_QUEUED {"id":"job-mtrh9n5p-d07d62af","to":"9230****567","msgType":"interactive"} | prev: 7b18e1446f8a
+2026-09-07T16:51:27.998Z EVENT_PROCESSED {"id":"wamid.evidence-001"} | prev: 49fd2a87d2cf
+2026-09-07T16:51:29.006Z EVENT_DUPLICATE {"id":"wamid.evidence-001"} | prev: 60ec7594c920
+2026-09-07T16:51:29.805Z OUTBOX_SENT {"id":"job-mtrh9n5p-d07d62af","to":"9230****567","attempts":0} | prev: 4c88a6d6664f
+CHAIN: INTACT

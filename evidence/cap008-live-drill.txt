@@ -1,0 +1,42 @@
+CAP-008 LIVE DRILL — 2026-09-08T03:10:36..03:12:30+00:00 (08:10–08:12 PKT, after store hours)
+Server: DEMO mode, signed webhooks enforced (demo-adversarial-secret), staff seeded via STAFF_SEED_JSON
+(boss=OWNER, hassan=STAFF, tenant khanewal-demo). Customer phone: 923001234555 (masked in audit as 9230****555).
+
+STEP 1  customer "menu_staff" (signed) → HTTP 200 → conversation on disk:
+        state=QUEUED reason=CUSTOMER_REQUESTED_HUMAN sla=WITHIN_SLA deadline=2026-09-08T05:05:00.000Z
+        (=10:05 PKT = next-open 10:00 + 5min — after-hours deadline logic correct)
+DEMO outbox (server log): after-hours honest ack delivered, phone masked:
+        "👤 Aapka message hamari team tak pahunch gaya hai ✅ Abhi store timing khatam ho chuki hai
+         (10am–10pm) — kal subah 10 baje ke baad team aap se baat karegi. Shukriya aapke sabar ka. 🙏"
+
+STEP 2  hassan login → {ok:true, staffId:hassan, role:STAFF, tenant:khanewal-demo} (scrypt verify; server-side session)
+STEP 3  GET /inbox?json=1 (as hassan) → 923001234555 QUEUED claimedBy=null unread=0 sla=WITHIN_SLA
+STEP 4  two customer msgs while QUEUED ("koi hai?", "bhai jaldi karo na") → AI_SUPPRESSED audit entries: 2
+        → ZERO demo outbox sends for both (server log confirms silence)
+STEP 5  hassan claim → CLAIMED (state CLAIMED, claimedBy=hassan)
+STEP 6  boss claim same chat → ALREADY_CLAIMED (audit CLAIM_CONFLICT, held_by:hassan) — no takeover
+STEP 7  hassan reply → SENT_VIA_OUTBOX → state HUMAN_ACTIVE
+DEMO outbox (server log): "Assalam o Alaikum! Hassan baat kar raha hoon — aap kya poochna chahte hain?"
+STEP 8  resolve → first attempt applied (shell line mangled mid-script) → replay returned ALREADY_APPLIED
+        with state RESOLVED intact — idempotent resolve demonstrated LIVE
+STEP 9  return-to-ai → AI_ACTIVE (explicit staff action; audit AI_RESUMED)
+STEP 10 customer "emi reno13" → DEMO outbox delivered full EMI plan — AI resumed on duty
+STEP 11 audit chain (verbatim from data/audit.jsonl):
+  03:10:37 ESCALATED            actor=system   conv=mo:9230****555 state=ESCALATION_PENDING action=-
+  03:11:03 AI_SUPPRESSED        actor=system   conv=mo:9230****555 state=QUEUED action=-
+  03:11:04 AI_SUPPRESSED        actor=system   conv=mo:9230****555 state=QUEUED action=-
+  03:11:05 ASSIGNED             actor=hassan   conv=mo:9230****555 state=CLAIMED action=act-drill-claim-hassan-1
+  03:11:05 CLAIMED              actor=hassan   conv=mo:9230****555 state=CLAIMED action=act-drill-claim-hassan-1
+  03:11:05 CLAIM_CONFLICT       actor=boss     conv=mo:9230****555 state=- action=-
+  03:11:25 HUMAN_MESSAGE_SENT   actor=hassan   conv=mo:9230****555 state=- action=act-drill-reply-1
+  03:11:27 RESOLVED             actor=hassan   conv=mo:9230****555 state=RESOLVED action=act-drill-resolve-1
+  03:11:43 AI_RESUMED           actor=hassan   conv=mo:9230****555 state=AI_ACTIVE action=act-drill-rtai-1
+
+STEP 12 SERVER HARD-STOPPED AND RESTARTED (stop_process → new boot):
+        GET /inbox/c/923001234555 → state=AI_ACTIVE, history transitions=7
+        stray claim locks after restart = 0 · inbox list = [(AI_ACTIVE, null)]
+        → ownership & history are server-side truth; browser memory plays no role.
+
+VERDICT: CAP-008 minimum usable product demonstrated live end-to-end, adversaries probed
+(claim conflict, unauth reads in test suite), state survived kill+restart.
+LIMIT: DEMO transport — real WhatsApp delivery belongs to Phase-5 pilot.

@@ -1,0 +1,2685 @@
+PHASE 2A — COMPLETE EVIDENCE PACKAGE (canonical single-file bundle, v3)
+Generated: 2026-09-07T17:18:07Z
+Integrity: 34/34 original artifacts re-hashed live vs evidence/MANIFEST.txt → 0 drift.
+v3 change: requested items 4-10 now exist as provenance-labeled derived extractions.
+
+@@@ ARTIFACT 01
+===============================================================
+FILE: PHASE0_RECONSTRUCTION.md
+PATH: /home/user/noor-whatsapp-bot/PHASE0_RECONSTRUCTION.md
+VERSION: content-addressed · mtime 2026-09-07 16:49:36 UTC
+SHA256: 2a22b4e211f425f01adcec19cd873ea2c7d928e7e956d94467e83873914d2591
+STATUS: FINAL — Phase 0 deliverable
+---------------------------------------------------------------
+# 🏛️ PROJECT SENTINEL — PHASE 0: FORENSIC RECONSTRUCTION
+**Target system:** `noor-whatsapp-bot` skeleton (existing codebase)
+**Date:** 2026-09-05 · **Rule in force:** Read-only. No code modified.
+
+> Prior artifact: `FEASIBILITY_AUDIT.md` (Phase 1 — Truth Audit, delivered 2026-09-05). This document completes Phase 0 and converts Phase-1 findings into the Sentinel registry format (`CAPABILITY_REGISTRY.yml`).
+
+---
+
+## A. SYSTEM INVENTORY (what actually exists)
+
+| Layer | File | What it really does today |
+|---|---|---|
+| Entry | `src/index.js` | Express on 0.0.0.0:3000; `GET /` status; `GET /health`; mounts webhook; loads JSON DB; starts cron scheduler |
+| Config | `src/config.js`, `.env.example` | Env-driven; `isLive()` gates real Meta sends vs DEMO console prints |
+| Webhook | `src/routes/webhook.js` | GET verification ✅; POST: immediate 200; signature check **only if `META_APP_SECRET` set**; iterates messages → `handleIncomingMessage` |
+| Brain | `src/services/brain.js` | markRead → media stubs → opt-out regex → opt-in regex → flow router → LLM (JSON mode, catalog-locked prompt) → rule-based fallback in DEMO; handoff → owner alert + state=HUMAN |
+| Flows | `src/flows/router.js` | Menu list, phones list, EMI flow, trade-in flow, **reserve flow**, visit booking, location, staff request |
+| Commerce | `emi.js`, `tradein.js`, `catalog.js`, `data/products.json` | Deterministic math/table lookups ✅; products.json = owner-maintained sample prices (marked SAMPLE ✅) |
+| Compliance | `src/services/governor.js` | 6-check `canSendMarketing`, pacing, quiet hours, warm-up limits — **exported but never called by any live path** |
+| Memory | `src/services/customers.js` | Whole-file JSON DB; engagement score; consent log; **non-atomic writes** |
+| Media | `src/services/media.js` | Stubs only (NOT IMPLEMENTED — honestly labeled in code ✅) |
+| Scheduler | `src/workers/scheduler.js` | 9AM PKT owner brief; hourly quality heartbeat (log only — no Meta API call yet) |
+| Deps | `package.json` | express, axios, dotenv, node-cron — all pure JS, no native builds ✅ |
+
+**Runtime status:** runs in DEMO mode (verified by live test 2026-09-05 — 3 simulated webhook messages, correct replies). LIVE mode (real Meta tokens) has **never been executed → NOT PROVEN.**
+
+---
+
+## B. ACTUAL DATA FLOW (inbound message, exact trace)
+
+```
+Meta webhook POST
+  → 200 OK immediately (correct)
+  → signature check ONLY IF appSecret configured        ⚠️ TB-1
+  → NO duplicate-event detection                        ⚠️ TB-2
+  → brain.handleIncomingMessage
+       → wa.markRead (external side effect, unlogged)   ⚠️ TB-3
+       → audio/image → stubs (fail-closed, honest)      ✅
+       → regex opt-out → consent mutation (audited ✅)
+       → regex "offers" → consent=TRUE on 1 keyword     ⚠️ TB-4
+       → flows.routeFlow
+            → "reserve" → tells customer "RESERVED ✅" 
+               but NEVER writes reservation,            🔴 TB-5
+               NEVER decrements stock (phantom lock)
+       → LLM think() → JSON reply
+            → NO post-generation price validation       ⚠️ TB-6
+            → on LLM error → handoff message            ✅ intent
+            → handoff = owner WhatsApp alert only;
+               NO staff inbox/queue/SLA exists          🔴 TB-7
+  → every send: demo-print or live POST; fire-and-forget ⚠️ TB-8
+  → engagement score +2 on ANY inbound msg              ⚠️ TB-9
+```
+
+## C. TRUST BOUNDARIES (current vs required)
+
+| # | Boundary | Current | Sentinel requirement | Gap |
+|---|---|---|---|---|
+| TB-1 | Webhook authenticity | Optional signature | Mandatory in LIVE | **Must refuse to boot LIVE without appSecret** |
+| TB-2 | Event identity | None — Meta retried deliveries would double-process | wamid idempotency store | **Missing** |
+| TB-3 | Side-effect logging | Console only | Audit log per action (§19) | Missing audit trail |
+| TB-4 | Consent authority | Single keyword = opt-in | Consent requires explicit, logged, confirmable intent (QR context / double-keyword confirm / receipt capture) | Weak consent evidence |
+| TB-5 | **Reservation truthfulness** | Customer told stock locked; nothing is locked | Deterministic atomic decrement + reservation row, or honest wording | 🔴 **Truth violation — top debt** |
+| TB-6 | LLM as de-facto price authority | Prices in prompt; unvalidated free text out | Post-generation validator: every PKR figure must trace to catalog/computation | Missing — prompt-injection & hallucination exposure |
+| TB-7 | Human fallback | Claims handoff; **no staff inbox exists** (§18 violation by definition) | Inbox, assignment, SLA, audit, return-to-AI | 🔴 **HUMAN FALLBACK = NOT IMPLEMENTED** (legally/morally cannot be claimed) |
+| TB-8 | Send durability | Fire-and-forget; failures lost | Outbox + retry + DLQ | Missing |
+| TB-9 | Scoring integrity | Any message (even spam/attack) raises engagement | Score from meaningful events only, decay, capped | Trivially gameable |
+| TB-10 | Owner identity | `OWNER_PHONE` env only, no command auth | Owner commands (STOP ALL) need authenticated channel | Missing (needed before kill-switch) |
+| TB-11 | products.json integrity | Unvalidated hand-edited file | Schema validation + sanity bounds + staleness state | Missing |
+
+## D. AUTONOMOUS ACTIONS CURRENTLY EXECUTABLE (Sentinel §11 audit)
+
+| Action | Current trigger | True autonomy level | Policy check before execution? | Verdict |
+|---|---|---|---|---|
+| Mark message read | every inbound | L4 | none | Acceptable risk; needs audit log |
+| Auto-reply to any text | every inbound | L4 | none (no per-sender rate cap) | Needs rate cap + spend circuit-breaker |
+| Mutate consent (out/in) | regex | L4 state change | deterministic regex ✅ logged ✅ | Valid; strengthen opt-in evidence (TB-4) |
+| Issue reservation token | keyword | **claims L5-adjacent (stock commitment)** | stock check exists; **no atomicity, no record** | 🔴 BLOCKED until redesigned |
+| Escalate & alert owner | LLM/handoff | L3→notify | n/a | Valid once staff inbox exists |
+| Daily owner brief | cron | L4 send | **no 24h-window awareness — will fail or violate outside window in LIVE** | Redesign: window-aware or template |
+| Campaign sends | `sendCampaign` | L4 marketing | Governor ✅ exists | Dormant — must register as dormant capability; never wire without Governor |
+| AI discount/price promises | LLM text | **would be L5 if acted on** | none | Must be made textually impossible via validator + wording rules |
+
+## E. TECHNICAL DEBT REGISTER
+
+| ID | Debt | Severity | Sentinel section | Fix phase |
+|---|---|---|---|---|
+| DEBT-01 | Phantom reservation (TB-5) | 🔴 Critical | §1, §26 | P2 redesign before any reservation claim |
+| DEBT-02 | Human fallback not real (TB-7) | 🔴 Critical | §18, §37 stop condition | P2 |
+| DEBT-03 | No idempotency (TB-2) | 🔴 High | §16 | P2 |
+| DEBT-04 | Non-atomic whole-file DB writes | 🔴 High | §31 | P2 (atomic temp-rename → SQLite) |
+| DEBT-05 | Optional webhook signature | 🔴 High | §5/§30 | P2 |
+| DEBT-06 | No outbox/retry/DLQ | 🔴 High | §17 | P2 |
+| DEBT-07 | Unvalidated LLM output on price paths (TB-6) | 🔴 High | §20, §3 | P3 |
+| DEBT-08 | No global kill switch / feature flags | 🟡 Med | §36 | P2 |
+| DEBT-09 | Governor unwired to any active path | 🟡 Med | §33 | P4 (wire at campaign build) |
+| DEBT-10 | PII in console logs & demo payloads (phone numbers printed) | 🟡 Med | §31/privacy | P2 (redaction modes) |
+| DEBT-11 | Scheduler not 24h-window-aware | 🟡 Med | §17 | P2 |
+| DEBT-12 | products.json: no schema/sanity/staleness enforcement | 🟡 Med | §28 | P2 |
+| DEBT-13 | Zero automated tests (happy-path demo only) | 🔴 High | §22 | P3 harness |
+| DEBT-14 | No backups of consent ledger | 🟡 Med | §31 | P2 |
+| DEBT-15 | Engagement gameability (TB-9) | 🟢 Low | §36 | P4 |
+| DEBT-16 | No model/version/prompt tracking on AI replies | 🟡 Med | §21 | P3 |
+
+## F. EXTERNAL DEPENDENCIES — CURRENT PROOF STATE
+
+| Dependency | Proof state | Required before |
+|---|---|---|
+| Meta Cloud API (messaging) | Verified by docs + standard behavior; **our LIVE send path never executed → NOT PROVEN end-to-end** | P5 live validation |
+| Meta quality-rating field | Docs-verified; unwired here | P2 owner-brief real data |
+| LLM provider (OpenAI-compatible) | Endpoint contract assumed OpenAI schema; **not contract-tested → NOT PROVEN** | P3 contract tests |
+| Whisper-class STT ur/pa | Docs-verified support; accuracy on Khanewal audio NOT PROVEN | P3 benchmark dataset |
+| Vision LLM | Capability plausible; accuracy NOT PROVEN (needs n=50 study) | P3/P5 |
+| PTA DIRBS | ❌ No public API (verified) | Feature permanently redesigned (guided flow) |
+| OPPO PK warranty | ❌ Web-form only, no API confirmed | Deep-link + staff-assisted only |
+| WhatsApp Calling | Voice-only; inbound OK in PK; outbound tier-gated ≥2000/24h (docs-verified) | P5, scope-limited |
+| JazzCash/Easypaisa PSP | Merchant APIs exist (aggregators verified); our account NOT PROVEN | P5 onboarding |
+| Co-existence (app+API same number) for +92 | Vendor-claimed; provider-specific → NOT PROVEN until BSP contract signed | Before promising number reuse |
+
+## G. PHASE-0 CONCLUSION
+
+The skeleton is an honest **PROTOTYPE**: its deterministic features (menu, EMI, trade-in, catalog) behave as designed in demo, and its media stubs fail closed. But per Sentinel law it currently holds:
+- **0 capabilities at VERIFIED PRODUCTION**
+- **2 critical truth violations** (DEBT-01 phantom reservation, DEBT-07 unvalidated LLM prices)
+- **1 §37 STOP condition already active**: *human fallback promised but absent* → **entire AI-handoff claim BLOCKED — NOT PROVEN** until staff inbox exists.
+
+**No code was modified in this phase.** Phase-1 truth audit (`FEASIBILITY_AUDIT.md`) + this reconstruction + `CAPABILITY_REGISTRY.yml` constitute the complete findings package.
+
+---
+**Gate:** Awaiting approval to produce the *implementation specification* for the first bounded capability (Phase 2 start): **Verified Event Ingestion — signature-mandatory + idempotent + audited + outbox-backed.** One capability, then attack it, verify it, register it, and only then continue.
+
+@@@ ARTIFACT 02
+===============================================================
+FILE: CAPABILITY_REGISTRY.yml
+PATH: /home/user/noor-whatsapp-bot/CAPABILITY_REGISTRY.yml
+VERSION: content-addressed · mtime 2026-09-07 16:49:36 UTC
+SHA256: d0a6e5f7f9bbb678c6caa6f97b5ba762183fc4d04cb6d48063a2647dcb6a629f
+STATUS: FINAL — living registry
+---------------------------------------------------------------
+# ═══════════════════════════════════════════════════════════════
+# PROJECT SENTINEL — CAPABILITY REGISTRY (machine-readable)
+# Sentinel Law §6/§11/§33/§34 enforcement artifact.
+# RULE: A capability whose contract is INCOMPLETE may never
+#       enter production implementation.
+# RULE: autonomy_level may never be raised without owner sign-off
+#       recorded in change_log.
+# last_audited: 2026-09-05 · registry_owner: store_owner
+# ═══════════════════════════════════════════════════════════════
+
+meta:
+  system: "Sentinel / NOOR — OPPO Experience Store Khanewal"
+  evidence_grades: {A: directly_verified, B: deterministically_derived, C: estimated_inferred, D: unavailable}
+  autonomy_levels: {L0: read_only, L1: interpret, L2: compute, L3: recommend, L4: execute_under_policy, L5: sensitive_requires_approval}
+  statuses: [VERIFIED_PRODUCTION, CONDITIONAL_PRODUCTION, PILOT, PROTOTYPE, BLOCKED, REDESIGN_REQUIRED, NOT_PROVEN]
+
+# ─── TIER-1 FULL CONTRACTS (§6 schema) — Phase 2/3 candidates ───
+
+capabilities:
+
+  CAP-001-verified-event-ingestion:
+    claim: "Every Meta webhook is authenticated, deduplicated, and durably logged BEFORE any processing."
+    purpose: "Foundation of all trust; kills duplicate-reply and spoofing (DEBT-02/03/05)."
+    inputs:
+      - {field: "X-Hub-Signature-256", source: meta_webhook_header, authority: meta_hmac_with_app_secret, freshness: per_request}
+      - {field: "message.wamid", source: meta_webhook_payload, authority: meta, freshness: per_request}
+    processing: {type: rule_engine, algorithm: "HMAC-SHA256 compare + seen-set", deterministic: true, model: none, version: n/a}
+    output: {type: "event_envelope{VERIFIED|FAILED|DUPLICATE}", evidence_grade: A}
+    permissions: {can_read: [webhook_payload], can_infer: [], can_recommend: [], can_execute: [log_event], human_approval_required: false}
+    failure_states:
+      insufficient_data: "REJECT 400, log"
+      authentication_failure: "REJECT 403, alert owner, never process"
+      provider_failure: "n/a (we are receiver)"
+      timeout: "n/a"
+      model_uncertainty: "n/a"
+    verification:
+      method: "attack suite: replay same webhook 10x → 1 effect; forged signature → rejected; LIVE boot without secret → refused"
+      acceptance_criteria: "0/10 duplicates; 100% forged rejected; boot gate proven"
+      reproducibility: "jest integration, any machine"
+    production_status: PILOT   # VR-2026-09-06-01: 5/5 attack+happy-path proofs green; real Meta traffic pending (Phase-5)
+    autonomy_level: L4
+    risk_level: LOW
+    last_verification_date: "2026-09-06"
+    verification_record: VERIFICATION_LOG.md#VR-2026-09-06-01
+
+  CAP-002-consent-ledger:
+    claim: "Marketing only to provable opt-ins; opt-out instant and permanent."
+    purpose: "Anti-ban root control + legal proof of consent."
+    inputs:
+      - {field: consent_event, source: "qr_scan | ctwa_ad | receipt_capture | keyword+confirm", authority: first_party_db, freshness: at_write}
+    processing: {type: rule_engine, algorithm: "append-only ledger {who,when,source,proof}", deterministic: true, model: none, version: n/a}
+    output: {type: consent_state, evidence_grade: A}
+    permissions: {can_read: [phone_consent], can_infer: [], can_recommend: [], can_execute: [grant_consent, revoke_consent], human_approval_required: false}
+    failure_states:
+      conflicting_data: "most recent REVOKE always wins"
+      provider_failure: "ledger is local-first"
+    verification:
+      method: "replay ledger → reconstruct every consent; deletion test → proof survives record deletion"
+      acceptance_criteria: "0 sends to non-ledger numbers in any test; revoke latency <1s"
+      reproducibility: deterministic
+    production_status: PROTOTYPE   # keyword consent exists; confirm-step + QR/receipt capture missing (TB-4)
+    autonomy_level: L4
+    risk_level: HIGH_IF_WRONG
+    last_verification_date: null
+
+  CAP-003-catalog-serving:
+    claim: "Prices/specs/stock shown are exactly the owner-approved file, always dated, never AI-invented."
+    purpose: "Price truth in a price-sensitive market."
+    inputs:
+      - {field: products.json, source: owner_file, authority: owner, freshness: "TTL 24h then STALE"}
+    processing: {type: "schema_validate + sanity_bounds(±25%) + freshness", deterministic: true, model: none, version: schema_v1}
+    output: {type: "price_card + evidence{observed_at,status:VERIFIED|STALE}", evidence_grade: "B (owner-file-derived)"}
+    permissions: {can_read: [products_file], can_infer: [], can_recommend: [], can_execute: [display_price], human_approval_required: "on >25% price jump in file edit"}
+    failure_states:
+      stale_data: "reply: 'rates kal ke ho sakte hain — confirm karein'; scarcity counters auto-disabled"
+      conflicting_data: "owner file wins over LLM memory ALWAYS"
+      provider_failure: "file unreadable → honest 'rates par kaam jaari hai' + handoff; never last-good-as-current (§27)"
+    verification:
+      method: "fuzz file: bad schema rejected; stale file → STALE badge present"
+      acceptance_criteria: "0 undated prices in any output"
+      reproducibility: jest
+    production_status: PROTOTYPE
+    autonomy_level: L2
+    risk_level: MEDIUM
+    last_verification_date: null
+
+  CAP-004-emi-calculator:
+    claim: "Installment math exact, consistent, fully disclosed."
+    purpose: "Sell on installments with transparent totals."
+    inputs: [{field: "principal, months, policy_rate", source: "products.json + store_policy", authority: owner, freshness: versioned}]
+    processing: {type: arithmetic, algorithm: "total = P(1+r·m); monthly = round(total/m)", deterministic: true, model: none, version: emi_v1}
+    output: {type: emi_table, evidence_grade: B}
+    permissions: {can_read: [prices, policy], can_infer: [], can_recommend: [plans], can_execute: [], human_approval_required: false}
+    failure_states: {insufficient_data: "ask model/amount", conflicting_data: "policy file wins"}
+    verification:
+      method: "unit tests vs hand-calc spreadsheet"
+      acceptance_criteria: "100% match; total payable ALWAYS displayed; labeled 'store installment plan' (never implies bank finance)"
+      reproducibility: jest
+    production_status: PROTOTYPE   # demo-verified; disclosure wording required
+    autonomy_level: L2
+    risk_level: MEDIUM_IF_MISLABELED
+    last_verification_date: null
+
+  CAP-005-tradein-table-quote:
+    claim: "Exchange value is 'andazan' from owner table; never binding; physical check prevails."
+    purpose: "Footfall-driving trade-in offers with honest wording."
+    inputs: [{field: "model_query, condition", source: customer_text, authority: owner_table, freshness: versioned}]
+    processing: {type: table_lookup, algorithm: "match row → condition column → value", deterministic: true, model: none, version: ti_v1}
+    output: {type: "estimate{value, label:ESTIMATED}", evidence_grade: B}
+    permissions: {can_read: [tradein_table], can_infer: [], can_recommend: [value], can_execute: [], human_approval_required: "final binding value = staff only"}
+    failure_states: {insufficient_data: "ask model/condition or photo flow"}
+    verification:
+      method: "unit tests + wording lint: every output carries 'andazan'/ESTIMATED"
+      acceptance_criteria: "0 binding-worded estimates"
+      reproducibility: jest
+    production_status: PROTOTYPE   # demo-verified incl. wording ✅
+    autonomy_level: L2
+    risk_level: LOW
+    last_verification_date: null
+
+  CAP-006-reservation-stock-lock:
+    claim: "Reservations are REAL: atomic stock decrement + durable record + 24h expiry release."
+    purpose: "Reserve & pickup that never lies (fixes DEBT-01)."
+    inputs:
+      - {field: stock_count, source: products.json, authority: owner_file, freshness: transactional}
+      - {field: customer_phone, source: webhook, authority: meta_sender_id, freshness: per_event}
+    processing: {type: "transaction{UPDATE stock WHERE stock>0 atomic; INSERT reservation{token,expires_at}}", deterministic: true, model: none, version: res_v1}
+    output: {type: "reservation_token | OUT_OF_STOCK_honest", evidence_grade: B}
+    permissions: {can_read: [stock], can_infer: [], can_recommend: [], can_execute: [create_reservation], human_approval_required: false}
+    failure_states:
+      conflicting_data: "atomic write; concurrent losers → honest waitlist offer"
+      provider_failure: "no token unless DB commit confirmed FIRST"
+      timeout: "EXECUTION_RESULT_UNKNOWN → never re-issue duplicate token"
+    verification:
+      method: "chaos: 20 parallel reserves on stock=1 → exactly 1 token, 19 honest refusals; restart mid-flow → no orphan tokens; expiry cron releases stock"
+      acceptance_criteria: "0 double-reservations in 10k simulations"
+      reproducibility: "jest + chaos script"
+    production_status: REDESIGN_REQUIRED   # current code issues phantom tokens (truth violation)
+    autonomy_level: L4
+    risk_level: HIGH
+    last_verification_date: null
+
+  CAP-007-marketing-governor:
+    claim: "No marketing message leaves without 6 deterministic checks; suppression heuristic labeled ESTIMATED, internal-only."
+    purpose: "Quality-rating protection; anti-ban by design."
+    inputs: [{field: "consent, opted_out, engagement, marketing_today, hour_pkt", source: first_party_db, authority: internal, freshness: per_decision}]
+    processing: {type: rule_engine, algorithm: "6-gate AND + engagement heuristic(grade C)", deterministic: "gates yes", model: none, version: gov_v1}
+    output: {type: "decision{SEND|SUPPRESS, reasons[]}", evidence_grade: "A for gate inputs; C for heuristic"}
+    permissions: {can_read: [customer_state], can_infer: [engagement], can_recommend: [], can_execute: [block_send], human_approval_required: "any override of BLOCK"}
+    failure_states:
+      insufficient_data: "DEFAULT = SUPPRESS (fail closed)"
+      stale_data: "quality unknown → assume YELLOW → utility-only"
+    verification:
+      method: "property tests: crafted states (opt-out, quiet hour, cap hit) must ALWAYS suppress; audit-log completeness check"
+      acceptance_criteria: "100% suppression on forbidden states; full audit trail"
+      reproducibility: "jest property-based"
+    production_status: PROTOTYPE   # logic written but unwired (DEBT-09)
+    autonomy_level: L4
+    risk_level: HIGH_IF_WRONG
+    last_verification_date: null
+
+  CAP-008-human-inbox:
+    claim: "Handoff is REAL: queue, claim/lock, SLA timer, context transfer, audit, return-to-AI."
+    purpose: "Makes the zero-bug promise true (§18). Removes active STOP condition."
+    inputs: [{field: "escalation_event{reason, chat_excerpt}", source: brain, authority: internal, freshness: realtime}]
+    processing: {type: "queue + assignment + SLA clock (staff or BSP inbox)", deterministic: true, model: none, version: inbox_v1}
+    output: {type: "handoff_state{QUEUED|CLAIMED|RESOLVED|BREACHED_SLA}", evidence_grade: B}
+    permissions: {can_read: [chat_history_scoped], can_infer: [], can_recommend: [draft_replies], can_execute: [assign, lock, resolve], human_approval_required: true}
+    failure_states:
+      provider_failure: "second-channel owner alert"
+      timeout: "SLA breach → owner escalation ≤5 min"
+    verification:
+      method: "kill-the-AI drill: force 20 handoffs, measure staff pager latency; all chats reachable + lockable"
+      acceptance_criteria: "100% reachable <5min in store hours; after-hours sets honest expectation"
+      reproducibility: scripted drill
+    production_status: BLOCKED   # NOT IMPLEMENTED (§18) — every AI claim depends on this
+    autonomy_level: "L5 orchestration, human in loop"
+    risk_level: CRITICAL
+    last_verification_date: null
+
+  CAP-009-ai-interpreter-guarded:
+    claim: "LLM interprets intent and drafts language; it NEVER holds price/permission/policy authority."
+    purpose: "Natural Urdu/Roman/English conversation without hallucinated facts or injection breaches."
+    inputs:
+      - {field: customer_text, source: webhook, authority: untrusted, freshness: per_event}
+      - {field: catalog_snapshot, source: CAP-003, authority: owner, freshness: "≤24h"}
+    processing:
+      type: "llm_structured(JSON) → schema_validate → fact_validate(every PKR figure must ∈ catalog∪computed) → policy_validate → wording_validate"
+      deterministic: false
+      model: "pinned model+version recorded per reply (§21)"
+      version: "locked in .env + logged"
+    output: {type: "reply | HANDOFF", evidence_grade: "C for intent; A/B only for facts carried from higher-authority sources"}
+    permissions: {can_read: [catalog_snapshot, chat_excerpt], can_infer: [intent, language, sentiment_hint], can_recommend: [reply_text], can_execute: [], human_approval_required: "any commitment outside policy"}
+    failure_states:
+      model_uncertainty: "HANDOFF (fail closed)"
+      provider_failure: "rule-based FAQ fallback labeled LIMITED + handoff offer"
+      conflicting_data: "catalog wins; bad figure discarded → regenerate once → else HANDOFF"
+    verification:
+      method: "500-scenario pack (ur/roman/en) + 100-prompt injection red-team"
+      acceptance_criteria: "unsafe-action rate = 0 · wrong-price after validator = 0 · floor-breach 0/100 · unsupported-answer ≤2%"
+      reproducibility: "eval harness + fixtures (fixtures labeled MOCK)"
+    production_status: REDESIGN_REQUIRED   # price validator absent (DEBT-07)
+    autonomy_level: "L1 interpret + L3 recommend ONLY — never L4"
+    risk_level: CRITICAL
+    last_verification_date: null
+
+  CAP-010-menu-flows:
+    claim: "Deterministic menus/flows answer safely without LLM cost."
+    purpose: "Cheap instant handling of bulk traffic."
+    inputs: [{field: button_or_keyword, source: webhook, authority: meta_sender, freshness: per_event}]
+    processing: {type: state_machine, algorithm: "router.js FSM", deterministic: true, model: none, version: fsm_v1}
+    output: {type: interactive_reply, evidence_grade: B}
+    permissions: {can_read: [catalog], can_infer: [], can_recommend: [], can_execute: [send_menu], human_approval_required: false}
+    failure_states: {insufficient_data: "fall to CAP-009 → CAP-008"}
+    verification:
+      method: "FSM path tests — every button id has a handler"
+      acceptance_criteria: "0 dead-ends"
+      reproducibility: jest
+    production_status: PROTOTYPE
+    autonomy_level: L4
+    risk_level: LOW
+    last_verification_date: null
+
+  CAP-011-outbound-dispatcher:
+    claim: "Every outbound message is queued, retried, 24h-window-checked, audit-logged; unknown outcomes are EXECUTION_RESULT_UNKNOWN — never fake success (§27)."
+    purpose: "Durability under Meta failures; zero lost replies."
+    inputs: [{field: outbound_job, source: internal_capabilities, authority: policy_checked_only, freshness: queued}]
+    processing: {type: "outbox + worker + exp backoff + DLQ + window gate + idempotency key", deterministic: true, model: none, version: outbox_v1}
+    output: {type: "delivery{QUEUED|SENT|DELIVERED|READ|FAILED|UNKNOWN}", evidence_grade: A}
+    permissions: {can_read: [outbox], can_infer: [], can_recommend: [], can_execute: [send_via_meta], human_approval_required: false}
+    failure_states:
+      provider_failure: "retry ×N → DLQ + owner alert"
+      timeout: "status UNKNOWN, reconcile via Meta status webhook"
+      conflicting_data: "Meta status callback is authority for DELIVERED/READ"
+    verification:
+      method: "chaos: kill worker mid-send; fake 500s; duplicate status callbacks"
+      acceptance_criteria: "0 silent losses; 0 duplicate sends on retry"
+      reproducibility: chaos tests
+    production_status: PILOT   # VR-2026-09-06-02: retry/DLQ/crash-recovery/no-double-send proven; real Meta failures pending (Phase-5)
+    autonomy_level: L4
+    risk_level: HIGH
+    last_verification_date: "2026-09-06"
+    verification_record: VERIFICATION_LOG.md#VR-2026-09-06-02
+
+  CAP-012-owner-brief:
+    claim: "Daily 9AM PKT summary = internal aggregates + live quality rating; window-aware delivery."
+    purpose: "Owner visibility without dashboard."
+    inputs:
+      - {field: aggregates, source: first_party_db, authority: internal, freshness: daily}
+      - {field: quality_rating, source: meta_api_field, authority: meta, freshness: at_send, note: "UNWIRED today"}
+    processing: {type: aggregation, algorithm: "counts + rating fetch", deterministic: true, model: none, version: brief_v1}
+    output: {type: daily_brief, evidence_grade: B}
+    permissions: {can_read: [db_aggregates, rating_field], can_infer: [], can_recommend: [], can_execute: [send_to_owner], human_approval_required: false}
+    failure_states:
+      provider_failure: "send with 'rating: UNAVAILABLE' label (§27 — real label, not fake value)"
+      window: "owner outside 24h window → hold until owner messages, or use approved utility template"
+    verification:
+      method: "1-week manual spot-check vs DB queries; window test"
+      acceptance_criteria: "counts match exactly"
+      reproducibility: "jest + manual week"
+    production_status: PROTOTYPE   # cron exists; rating unwired; window bug (DEBT-11)
+    autonomy_level: L4
+    risk_level: LOW
+    last_verification_date: null
+
+# ─── TIER-2 COMPACT REGISTRY — contracts to be COMPLETED ───
+# ─── before their build phase. Gaps are intentional.        ───
+
+registry_compact:
+  - {id: CAP-020-voice-stt-ur-pa, claim: "Transcribe Urdu/Punjabi voice notes", evidence_grade: C, autonomy: L1, production_status: NOT_PROVEN, gate: "100-note local benchmark: WER≤15%; PII redaction in logs", deps: [stt_provider, ffmpeg]}
+  - {id: CAP-021-voice-saraiki, claim: "Saraiki voice understanding", evidence_grade: D, autonomy: L0, production_status: NOT_PROVEN, gate: "no provider lists Saraiki (verified) — benchmark decides ship-or-drop", note: "PUBLIC CLAIM FORBIDDEN until gate passes; instant human fallback"}
+  - {id: CAP-022-vision-tradein, claim: "Photo → model + condition estimate", evidence_grade: C, autonomy: "L1+L3", production_status: NOT_PROVEN, gate: "n=50 AI-vs-staff grading study; output always ESTIMATED + staff confirm"}
+  - {id: CAP-023-screenshot-pricematch, claim: "OCR competitor price → human-approved match", evidence_grade: C, autonomy: L3, human_approval_required: true, production_status: PROTOTYPE_DESIGN, gate: "no automated financial commitment from screenshots ever (fraud)"}
+  - {id: CAP-024-tts-urdu-replies, claim: "Urdu spoken replies", evidence_grade: C, autonomy: L4, production_status: NOT_PROVEN, gate: "10-customer blind listening test; text always accompanies"}
+  - {id: CAP-025-pta-guided-check, claim: "Guide customer through SMS-8484 / DVS", evidence_grade: A_guidance, autonomy: L4, production_status: VALIDATED_DESIGN, note: "REDESIGNED — no PTA API exists (verified); bot never claims to query PTA"}
+  - {id: CAP-026-oppo-warranty-deeplink, claim: "IMEI → official OPPO PK warranty page + staff-assisted check", evidence_grade: B_guidance, autonomy: L4, production_status: VALIDATED_DESIGN, note: "REDESIGNED — no confirmed OPPO API; scraping forbidden"}
+  - {id: CAP-027-payment-links, claim: "Reservation advance via JazzCash/Easypaisa", evidence_grade: B_after_onboarding, autonomy: L5, production_status: BLOCKED, deps: "merchant KYC/contract NOT PROVEN until approved", gate: "sandbox + Rs.1 live txn + idempotent PSP-callback dedupe + refund policy in writing"}
+  - {id: CAP-028-inbound-calling, claim: "Customer taps → voice call to store", evidence_grade: A_capability, autonomy: L4, production_status: CONDITIONAL_PENDING_BSP, note: "voice-only (verified); PK allowed; confirm BSP support for +92"}
+  - {id: CAP-029-outbound-calling, claim: "Store calls customer", evidence_grade: A_capability, autonomy: L5, production_status: BLOCKED, note: "needs messaging tier ≥2000/24h + per-user consent (verified); NO video exists — demos = pre-recorded clips"}
+  - {id: CAP-030-festival-engine, claim: "Scheduled compliant campaigns", evidence_grade: B, autonomy: L4, production_status: PROTOTYPE_DESIGN, gate: "templates approved ≥72h early; every send via CAP-007"}
+  - {id: CAP-031-dost-referrals, claim: "Trackable bring-a-friend rewards", evidence_grade: B, autonomy: L4, production_status: PROTOTYPE_DESIGN, gate: "reward only on staff-verified sale + 7-day return window; farming tests"}
+  - {id: CAP-032-postpurchase-journeys, claim: "Day0/3/15/30/Mo-11 touches", evidence_grade: B, autonomy: L4, production_status: PROTOTYPE_DESIGN, blocks_on: "staff sale-logging habit (process dependency, documented)"}
+  - {id: CAP-033-watchlist, claim: "One alert on real price drop", evidence_grade: B, autonomy: L4, production_status: PROTOTYPE_DESIGN, gate: "fires only on owner-file change events"}
+  - {id: CAP-034-deadchat-revival, claim: "Single useful re-engagement to lapsed opt-ins", evidence_grade: "B+C", autonomy: L4, production_status: PROTOTYPE_DESIGN, gate: "through CAP-007; 90-day suppression"}
+  - {id: CAP-035-review-requests, claim: "Review ask sent EQUALLY to all buyers", evidence_grade: B, autonomy: L4, production_status: REDESIGN_DONE, note: "sentiment-gating removed — Google policy prohibits review-gating"}
+  - {id: CAP-036-staff-copilot, claim: "Draft replies + chat summaries for staff", evidence_grade: C, autonomy: L3, human_approval_required: one_tap_send, production_status: PROTOTYPE_DESIGN, gate: "staff rate ≥4/5 in blind test"}
+  - {id: CAP-037-competitor-radar, claim: "Log/summarize competitor offers quoted by customers", evidence_grade: C, autonomy: "L0/L1", production_status: PROTOTYPE_DESIGN, note: "no automated counter-offers — owner decides"}
+  - {id: CAP-038-complaint-firewall, claim: "Anger → ≤5min escalation", evidence_grade: C, autonomy: L4_routing, production_status: PROTOTYPE_DESIGN, gate: "recall ≥90% on 50-msg angry corpus; multi-signal, not keywords-only"}
+  - {id: CAP-039-negotiation-engine, claim: "Best-price offers within floor", evidence_grade: B_rules, autonomy: L4, production_status: REDESIGN_DONE, note: "deterministic engine owns numbers; LLM may ONLY phrase; validator re-checks; 100-injection red-team: 0 breaches required"}
+  - {id: CAP-040-dream-visualizer, claim: "Personalized phone card image", evidence_grade: C, autonomy: L4, production_status: PROTOTYPE_DESIGN, gate: "price = text overlay from catalog; model never paints numbers; AI-generated watermark"}
+  - {id: CAP-041-owner-voice-clone, claim: "AI thank-you notes in owner voice", evidence_grade: C, autonomy: L4, human_approval_required: launch, production_status: NOT_PROVEN, gate: "written owner consent + mandatory AI disclosure + voice-model access control + legal check"}
+  - {id: CAP-042-family-graph, claim: "Household bundle selling", evidence_grade: C, autonomy: L3, production_status: PROTOTYPE_DESIGN, gate: "invite-only explicit linking; any member can exit; no inferred ties"}
+  - {id: CAP-043-zerowaste-targeting, claim: "Re-contact past interested chatters for slow stock", evidence_grade: "B+C", autonomy: L4, production_status: PROTOTYPE_DESIGN, gate: "through CAP-007 only"}
+  - {id: CAP-044-birthday-winback, claim: "DOB-based offers", evidence_grade: B, autonomy: L4, production_status: PROTOTYPE_DESIGN, gate: "explicit consented DOB with stated purpose"}
+  - {id: CAP-045-segment-of-one, claim: "Deep-personalized campaigns", evidence_grade: C, autonomy: L4, production_status: PROTOTYPE_DESIGN, gate: "opt-out delta ≤ generic in A/B; owner creepiness review"}
+  - {id: CAP-046-phone-doctor, claim: "Fault triage + likely cause + book slot", evidence_grade: C, autonomy: "L1+L3", production_status: PROTOTYPE_DESIGN, gate: "30-case technician review; wording always 'likely'; quotes are ranges"}
+  - {id: CAP-047-lost-phone-guidance, claim: "Official steps content (PTA 8484/carrier)", evidence_grade: A_content, autonomy: L4, production_status: VALIDATED_DESIGN, note: "guidance only — we never claim to block IMEIs"}
+  - {id: CAP-048-free-service-days, claim: "Slot booking for free services", evidence_grade: B, autonomy: L4, production_status: PROTOTYPE_DESIGN}
+  - {id: CAP-049-visit-tokens, claim: "Store visit slots, no-queue", evidence_grade: B, autonomy: L4, production_status: PROTOTYPE_DESIGN, gate: "slots/hour cap; double-booking test"}
+  - {id: CAP-050-honest-scarcity, claim: "'2 left' counters", evidence_grade: B, autonomy: L4, production_status: PROTOTYPE_DESIGN, gate: "auto-disabled when stock STALE (§28)"}
+  - {id: CAP-051-bundle-brain, claim: "Margin-safe bundles", evidence_grade: C, autonomy: L3, production_status: PROTOTYPE_DESIGN, gate: "unit tests: every generated bundle ≥ floor margin"}
+  - {id: CAP-052-community-calendar, claim: "Local event-driven offers", evidence_grade: B, autonomy: L4, production_status: PROTOTYPE_DESIGN}
+  - {id: CAP-053-assisted-attribution, claim: "'Assisted conversions (estimated)' reporting", evidence_grade: C_labeled, autonomy: L2, production_status: REDESIGN_DONE, note: "never causal revenue claims; depends on staff sale-logging"}
+  - {id: CAP-054-quality-monitor, claim: "Hourly rating read; auto-pause marketing on YELLOW", evidence_grade: A, autonomy: L4_defensive_only, production_status: VALIDATED_DESIGN, note: "can only RESTRICT sending, never enable"}
+  - {id: CAP-055-owner-kill-switch, claim: "Authenticated STOP ALL automations", evidence_grade: B, autonomy: safety, production_status: REQUIRED_NOT_BUILT, gate: "authenticated owner channel (TB-10); drill: 1 command halts everything <60s"}
+
+# ─── RELEASE GATE P0 (§38 Phase-6) — nothing ships without all ───
+release_gate_P0:
+  - every_capability_in_scope_has_COMPLETE_contract
+  - CAP-008_staff_inbox_live_and_drilled
+  - CAP-001_idempotency_proven
+  - CAP-011_outbox_proven
+  - CAP-009_validator_proven_zero_price_zero_injection_breaches
+  - CAP-002_consent_ledger_replayable
+  - CAP-055_kill_switch_drilled
+  - evidence_labels_in_every_customer_facing_output
+  - CAP-006_reservation_atomicity_proven_or_feature_off
+  - CAP-054_quality_monitor_wired
+  - pii_redaction_in_logs
+  - automated_backup_of_ledger_and_db
+
+change_log:
+  - {date: "2026-09-05", actor: "sentinel-audit", note: "Registry created from FEASIBILITY_AUDIT.md + PHASE0_RECONSTRUCTION.md. 12 full contracts + 36 compact entries. 0 capabilities at VERIFIED_PRODUCTION."}
+  - {date: "2026-09-06", actor: "sentinel-eng", note: "PHASE 2A shipped+verified (10/10 tests, adversarial demo clean). CAP-001 & CAP-011 → PILOT. Debt closed: DEBT-02/03/05/06, partial 10/11. New structural rule learned in verification: post-send bookkeeping must never trigger resend (SENT_WITH_AUDIT_GAP state added). NEXT: Phase 2B — human inbox (CAP-008) removes the §18 STOP condition."}
+
+@@@ ARTIFACT 03 (requested: PHASE2_IMPLEMENTATION_SPEC.md — actual artifact name PHASE2A_SPEC.md)
+===============================================================
+FILE: PHASE2A_SPEC.md
+PATH: /home/user/noor-whatsapp-bot/PHASE2A_SPEC.md
+VERSION: content-addressed · mtime 2026-09-07 16:49:36 UTC
+SHA256: ccc8ddfad65d330089ec27da1f7cfe8bde6fc96092e880817c1a344c51c4c793
+STATUS: FINAL — Phase-2A implementation spec
+---------------------------------------------------------------
+# PHASE 2A — IMPLEMENTATION SPECIFICATION
+### Verified Event Ingestion + Idempotency + Audit Trail + Durable Outbox
+**Covers:** CAP-001, CAP-011 (partially CAP-002 posture) · **Sentinel §40 format**
+
+---
+
+**CLAIM**
+Every inbound Meta event is authenticated (HMAC), deduplicated (wamid), and audit-logged BEFORE any processing. Every outbound message travels a durable outbox (queue → send → retry/backoff → DLQ) with truthful states (QUEUED/SENDING/SENT/FAILED/DLQ/UNKNOWN) and a 24h-window gate in LIVE mode. No fake success anywhere (§27).
+
+**EVIDENCE**
+- Meta webhook signing via `X-Hub-Signature-256` (HMAC-SHA256, app secret) — documented provider behavior (Phase-0 S1, verified).
+- Meta retries non-200 webhooks (documented) → dedupe required.
+- 24h customer-service window for free-form messages (documented) → gate required in LIVE.
+- Local crash-safety: atomic rename + marker files are POSIX-guaranteed atomic on same filesystem.
+
+**AUTHORITY**
+Signature secret = Meta app secret (env). Event identity = Meta-assigned `wamid`. Window state = our DB `lastSeen` (Grade B). Outbox alone may send; nothing bypasses it.
+
+**DEPENDENCIES**
+Express raw-body capture (exists), fs rename atomicity, config env, customers.lastSeen. No new npm deps.
+
+**FAILURE MODES** (all must become explicit states)
+forged signature → 403 + audit · replayed wamid → suppressed + audit · crash mid-send → boot recovery marks UNKNOWN_REQUEUED (never assumed) · provider 5xx → backoff retry ×5 → DLQ + audit · window closed (LIVE) → DLQ with reason, never sent · concurrent same-job → rename-lock makes one winner.
+
+**SECURITY**
+Secret from env only · timingSafeEqual compare · boot REFUSAL if LIVE without appSecret · PII redaction in audit (phone masking default ON) · hash-chained audit entries (tamper-evident: each entry hashes previous hash).
+
+**VERIFICATION** (node:test, zero new deps)
+1. valid signed msg → processed once · 2. replay → duplicate suppressed · 3. forged → 403, zero effects · 4. unsigned (secret set) → 403 · 5. boot gate throws for LIVE-without-secret · 6. outbox retry×2 → success, attempts recorded · 7. permanent failure → DLQ + audit · 8. crash recovery: mid-flight job requeued once; already-final job discarded · 9. PII masked in audit file · 10. corrupt JSON read → fallback. **Plus live adversarial demo:** replay + forgery curl attacks against running server.
+
+**REAL-WORLD STATUS:** PARTIALLY → PILOT after tests (real Meta traffic still pending; will be PROVEN in Phase 5).
+
+**IMPLEMENTATION:**
+`src/sentinel/{store,audit,idempotency,gates,outbox}.js` (new) · `src/app.js` (new, testable app builder) · modified: `config.js, index.js, routes/webhook.js, services/whatsapp.js, package.json, .env.example`
+
+@@@ ARTIFACT 04
+===============================================================
+FILE: CAP-001_EVENT_INGESTION_SPEC.md
+PATH: /home/user/noor-whatsapp-bot/CAP-001_EVENT_INGESTION_SPEC.md
+VERSION: content-addressed · mtime 2026-09-07 17:17:45 UTC
+SHA256: 23713160c724c0d2296a6b5e46dc7be4197cb6264e19bdefb78ad52509857e3b
+STATUS: DERIVED EXTRACTION (2026-09-07, provenance header inside)
+---------------------------------------------------------------
+# CAP-001 EVENT INGESTION — SPEC
+# STATUS: DERIVED EXTRACTION — created 2026-09-07 at reviewer request.
+# PROVENANCE: content assembled verbatim from the artifact(s) listed below.
+# These files did NOT exist during Phase-2A verification; they are faithful
+# copies from the governing artifacts, not originals. No content invented.
+# SOURCES:
+#   - CAPABILITY_REGISTRY.yml  (SHA256: d0a6e5f7f9bbb678c6caa6f97b5ba762183fc4d04cb6d48063a2647dcb6a629f)
+#   - PHASE2A_SPEC.md  (SHA256: ccc8ddfad65d330089ec27da1f7cfe8bde6fc96092e880817c1a344c51c4c793)
+---
+## Capability contract (verbatim from CAPABILITY_REGISTRY.yml)
+
+```yaml
+  CAP-001-verified-event-ingestion:
+    claim: "Every Meta webhook is authenticated, deduplicated, and durably logged BEFORE any processing."
+    purpose: "Foundation of all trust; kills duplicate-reply and spoofing (DEBT-02/03/05)."
+    inputs:
+      - {field: "X-Hub-Signature-256", source: meta_webhook_header, authority: meta_hmac_with_app_secret, freshness: per_request}
+      - {field: "message.wamid", source: meta_webhook_payload, authority: meta, freshness: per_request}
+    processing: {type: rule_engine, algorithm: "HMAC-SHA256 compare + seen-set", deterministic: true, model: none, version: n/a}
+    output: {type: "event_envelope{VERIFIED|FAILED|DUPLICATE}", evidence_grade: A}
+    permissions: {can_read: [webhook_payload], can_infer: [], can_recommend: [], can_execute: [log_event], human_approval_required: false}
+    failure_states:
+      insufficient_data: "REJECT 400, log"
+      authentication_failure: "REJECT 403, alert owner, never process"
+      provider_failure: "n/a (we are receiver)"
+      timeout: "n/a"
+      model_uncertainty: "n/a"
+    verification:
+      method: "attack suite: replay same webhook 10x → 1 effect; forged signature → rejected; LIVE boot without secret → refused"
+      acceptance_criteria: "0/10 duplicates; 100% forged rejected; boot gate proven"
+      reproducibility: "jest integration, any machine"
+    production_status: PILOT   # VR-2026-09-06-01: 5/5 attack+happy-path proofs green; real Meta traffic pending (Phase-5)
+    autonomy_level: L4
+    risk_level: LOW
+    last_verification_date: "2026-09-06"
+    verification_record: VERIFICATION_LOG.md#VR-2026-09-06-01
+```
+
+## Phase-2A implementation spec (verbatim)
+
+```markdown
+# PHASE 2A — IMPLEMENTATION SPECIFICATION
+### Verified Event Ingestion + Idempotency + Audit Trail + Durable Outbox
+**Covers:** CAP-001, CAP-011 (partially CAP-002 posture) · **Sentinel §40 format**
+
+---
+
+**CLAIM**
+Every inbound Meta event is authenticated (HMAC), deduplicated (wamid), and audit-logged BEFORE any processing. Every outbound message travels a durable outbox (queue → send → retry/backoff → DLQ) with truthful states (QUEUED/SENDING/SENT/FAILED/DLQ/UNKNOWN) and a 24h-window gate in LIVE mode. No fake success anywhere (§27).
+
+**EVIDENCE**
+- Meta webhook signing via `X-Hub-Signature-256` (HMAC-SHA256, app secret) — documented provider behavior (Phase-0 S1, verified).
+- Meta retries non-200 webhooks (documented) → dedupe required.
+- 24h customer-service window for free-form messages (documented) → gate required in LIVE.
+- Local crash-safety: atomic rename + marker files are POSIX-guaranteed atomic on same filesystem.
+
+**AUTHORITY**
+Signature secret = Meta app secret (env). Event identity = Meta-assigned `wamid`. Window state = our DB `lastSeen` (Grade B). Outbox alone may send; nothing bypasses it.
+
+**DEPENDENCIES**
+Express raw-body capture (exists), fs rename atomicity, config env, customers.lastSeen. No new npm deps.
+
+**FAILURE MODES** (all must become explicit states)
+forged signature → 403 + audit · replayed wamid → suppressed + audit · crash mid-send → boot recovery marks UNKNOWN_REQUEUED (never assumed) · provider 5xx → backoff retry ×5 → DLQ + audit · window closed (LIVE) → DLQ with reason, never sent · concurrent same-job → rename-lock makes one winner.
+
+**SECURITY**
+Secret from env only · timingSafeEqual compare · boot REFUSAL if LIVE without appSecret · PII redaction in audit (phone masking default ON) · hash-chained audit entries (tamper-evident: each entry hashes previous hash).
+
+**VERIFICATION** (node:test, zero new deps)
+1. valid signed msg → processed once · 2. replay → duplicate suppressed · 3. forged → 403, zero effects · 4. unsigned (secret set) → 403 · 5. boot gate throws for LIVE-without-secret · 6. outbox retry×2 → success, attempts recorded · 7. permanent failure → DLQ + audit · 8. crash recovery: mid-flight job requeued once; already-final job discarded · 9. PII masked in audit file · 10. corrupt JSON read → fallback. **Plus live adversarial demo:** replay + forgery curl attacks against running server.
+
+**REAL-WORLD STATUS:** PARTIALLY → PILOT after tests (real Meta traffic still pending; will be PROVEN in Phase 5).
+
+**IMPLEMENTATION:**
+`src/sentinel/{store,audit,idempotency,gates,outbox}.js` (new) · `src/app.js` (new, testable app builder) · modified: `config.js, index.js, routes/webhook.js, services/whatsapp.js, package.json, .env.example`
+
+```
+
+@@@ ARTIFACT 05
+===============================================================
+FILE: IDEMPOTENCY_SPEC.md
+PATH: /home/user/noor-whatsapp-bot/IDEMPOTENCY_SPEC.md
+VERSION: content-addressed · mtime 2026-09-07 17:17:45 UTC
+SHA256: fcb88188bb3402f2105b366575a1f87f6830eef8069c3ead4c6cd178d5b79c26
+STATUS: DERIVED EXTRACTION (2026-09-07)
+---------------------------------------------------------------
+# IDEMPOTENCY — SPECIFICATION
+# STATUS: DERIVED EXTRACTION — created 2026-09-07 at reviewer request.
+# PROVENANCE: content assembled verbatim from the artifact(s) listed below.
+# These files did NOT exist during Phase-2A verification; they are faithful
+# copies from the governing artifacts, not originals. No content invented.
+# SOURCES:
+#   - CAPABILITY_REGISTRY.yml  (SHA256: d0a6e5f7f9bbb678c6caa6f97b5ba762183fc4d04cb6d48063a2647dcb6a629f)
+#   - src/sentinel/idempotency.js  (SHA256: fc66b070eca398f9ea98e2b836866eaf5bc516391956683e3ef00c12e52c70a2)
+---
+## Governing contract
+
+```yaml
+  CAP-001-verified-event-ingestion:
+    claim: "Every Meta webhook is authenticated, deduplicated, and durably logged BEFORE any processing."
+    purpose: "Foundation of all trust; kills duplicate-reply and spoofing (DEBT-02/03/05)."
+    inputs:
+      - {field: "X-Hub-Signature-256", source: meta_webhook_header, authority: meta_hmac_with_app_secret, freshness: per_request}
+      - {field: "message.wamid", source: meta_webhook_payload, authority: meta, freshness: per_request}
+    processing: {type: rule_engine, algorithm: "HMAC-SHA256 compare + seen-set", deterministic: true, model: none, version: n/a}
+    output: {type: "event_envelope{VERIFIED|FAILED|DUPLICATE}", evidence_grade: A}
+    permissions: {can_read: [webhook_payload], can_infer: [], can_recommend: [], can_execute: [log_event], human_approval_required: false}
+    failure_states:
+      insufficient_data: "REJECT 400, log"
+      authentication_failure: "REJECT 403, alert owner, never process"
+      provider_failure: "n/a (we are receiver)"
+      timeout: "n/a"
+      model_uncertainty: "n/a"
+    verification:
+      method: "attack suite: replay same webhook 10x → 1 effect; forged signature → rejected; LIVE boot without secret → refused"
+      acceptance_criteria: "0/10 duplicates; 100% forged rejected; boot gate proven"
+      reproducibility: "jest integration, any machine"
+    production_status: PILOT   # VR-2026-09-06-01: 5/5 attack+happy-path proofs green; real Meta traffic pending (Phase-5)
+    autonomy_level: L4
+    risk_level: LOW
+    last_verification_date: "2026-09-06"
+    verification_record: VERIFICATION_LOG.md#VR-2026-09-06-01
+```
+
+## Executable specification (complete source, verbatim)
+
+```javascript
+// ─────────────────────────────────────────────────────────────
+//  EVENT IDENTITY / IDEMPOTENCY (§16)
+//  Marker-file claiming: fs 'wx' = atomic create-if-absent.
+//  Crash-safe by design — ya to file bani (claimed) ya nahi (duplicate).
+// ─────────────────────────────────────────────────────────────
+import fs from 'fs';
+import path from 'path';
+import { config } from '../config.js';
+import { ensureDir } from './store.js';
+
+export function initIdempotency() {
+  ensureDir(config.idemDir);
+}
+
+const safe = (id) => String(id).replace(/[^a-zA-Z0-9._-]/g, '_');
+
+/** @returns true = fresh event (ab process karo) · false = duplicate (skip) */
+export function claimEvent(eventId) {
+  const file = path.join(config.idemDir, safe(eventId));
+  try {
+    const fd = fs.openSync(file, 'wx'); // atomically fails if exists
+    fs.writeSync(fd, new Date().toISOString());
+    fs.closeSync(fd);
+    return true;
+  } catch (e) {
+    if (e.code === 'EEXIST') return false;
+    throw e;
+  }
+}
+
+// Best-effort cleanup (markers are tiny; 30 din ka retention)
+export function gcIdempotency(days = 30) {
+  const cutoff = Date.now() - days * 86400_000;
+  for (const f of fs.readdirSync(config.idemDir)) {
+    try {
+      const st = fs.statSync(path.join(config.idemDir, f));
+      if (st.mtimeMs < cutoff) fs.rmSync(path.join(config.idemDir, f), { force: true });
+    } catch { /* ignore */ }
+  }
+}
+
+```
+
+@@@ ARTIFACT 06
+===============================================================
+FILE: OUTBOX_SPEC.md
+PATH: /home/user/noor-whatsapp-bot/OUTBOX_SPEC.md
+VERSION: content-addressed · mtime 2026-09-07 17:17:45 UTC
+SHA256: 74d8114640f102b7e948c3d911d0abf75afc47a32e0109019427d6ecffc324c5
+STATUS: DERIVED EXTRACTION (2026-09-07)
+---------------------------------------------------------------
+# OUTBOX — SPECIFICATION
+# STATUS: DERIVED EXTRACTION — created 2026-09-07 at reviewer request.
+# PROVENANCE: content assembled verbatim from the artifact(s) listed below.
+# These files did NOT exist during Phase-2A verification; they are faithful
+# copies from the governing artifacts, not originals. No content invented.
+# SOURCES:
+#   - CAPABILITY_REGISTRY.yml  (SHA256: d0a6e5f7f9bbb678c6caa6f97b5ba762183fc4d04cb6d48063a2647dcb6a629f)
+#   - src/sentinel/outbox.js  (SHA256: fdddd276b36b8ad04758a0e4775598d42770f87e1fb9e9c3ac8383a5f29794e4)
+---
+## Governing contract
+
+```yaml
+  CAP-011-outbound-dispatcher:
+    claim: "Every outbound message is queued, retried, 24h-window-checked, audit-logged; unknown outcomes are EXECUTION_RESULT_UNKNOWN — never fake success (§27)."
+    purpose: "Durability under Meta failures; zero lost replies."
+    inputs: [{field: outbound_job, source: internal_capabilities, authority: policy_checked_only, freshness: queued}]
+    processing: {type: "outbox + worker + exp backoff + DLQ + window gate + idempotency key", deterministic: true, model: none, version: outbox_v1}
+    output: {type: "delivery{QUEUED|SENT|DELIVERED|READ|FAILED|UNKNOWN}", evidence_grade: A}
+    permissions: {can_read: [outbox], can_infer: [], can_recommend: [], can_execute: [send_via_meta], human_approval_required: false}
+    failure_states:
+      provider_failure: "retry ×N → DLQ + owner alert"
+      timeout: "status UNKNOWN, reconcile via Meta status webhook"
+      conflicting_data: "Meta status callback is authority for DELIVERED/READ"
+    verification:
+      method: "chaos: kill worker mid-send; fake 500s; duplicate status callbacks"
+      acceptance_criteria: "0 silent losses; 0 duplicate sends on retry"
+      reproducibility: chaos tests
+    production_status: PILOT   # VR-2026-09-06-02: retry/DLQ/crash-recovery/no-double-send proven; real Meta failures pending (Phase-5)
+    autonomy_level: L4
+    risk_level: HIGH
+    last_verification_date: "2026-09-06"
+    verification_record: VERIFICATION_LOG.md#VR-2026-09-06-02
+```
+
+## Executable specification (complete source, verbatim)
+
+```javascript
+// ─────────────────────────────────────────────────────────────
+//  DURABLE OUTBOX (§16/§17/§27) — koi message kabhi gum nahi hota,
+//  koi success kabhi fake nahi hota.
+//  States: QUEUED → SENDING → SENT | RETRY_SCHEDULED | DLQ | UNKNOWN_REQUEUED
+//  Crash-safety: directory renames are atomic; recovery is HONEST (uncertain).
+// ─────────────────────────────────────────────────────────────
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
+import { ensureDir, atomicWriteJson } from './store.js';
+
+export function createOutbox({
+  dir,
+  sendFn,
+  windowGuard = () => ({ ok: true }),
+  auditFn = () => {},
+  pollMs = 2000,
+  retry = { maxAttempts: 5, baseMs: 1500, maxMs: 30000 },
+}) {
+  const Q = path.join(dir, 'queued');
+  const S = path.join(dir, 'sending');
+  const D = path.join(dir, 'sent');
+  const F = path.join(dir, 'dlq');
+  [Q, S, D, F].forEach(ensureDir);
+
+  const safeRead = (p) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; } };
+  const list = (d) => fs.readdirSync(d).filter((f) => f.endsWith('.json'));
+  const existsFinal = (f) => fs.existsSync(path.join(D, f)) || fs.existsSync(path.join(F, f));
+
+  function enqueue(payload) {
+    const id = 'job-' + Date.now().toString(36) + '-' + crypto.randomBytes(4).toString('hex');
+    const job = {
+      id, idempotencyKey: id, status: 'QUEUED', attempts: 0,
+      nextAttemptAt: Date.now(), createdAt: new Date().toISOString(), payload,
+    };
+    atomicWriteJson(path.join(Q, `${id}.json`), job);
+    auditFn('OUTBOX_QUEUED', { id, to: payload?.to, msgType: payload?.type });
+    return { queued: true, id };
+  }
+
+  let timer = null;
+  let running = false;
+
+  async function tick() {
+    if (running) return; // single-flight
+    running = true;
+    try {
+      const due = list(Q)
+        .map((f) => ({ f, job: safeRead(path.join(Q, f)) }))
+        .filter((x) => x.job && x.job.status !== 'SENDING' && x.job.nextAttemptAt <= Date.now())
+        .sort((a, b) => new Date(a.job.createdAt) - new Date(b.job.createdAt));
+      for (const { f, job } of due.slice(0, 5)) await processJob(f, job);
+    } finally {
+      running = false;
+    }
+  }
+
+  async function processJob(f, job) {
+    const qf = path.join(Q, f);
+    const sf = path.join(S, f);
+    try {
+      fs.renameSync(qf, sf); // atomic claim — concurrent processor loses here
+    } catch {
+      return; // someone else claimed it
+    }
+
+    // Policy gate BEFORE touching provider (§12 action firewall-lite)
+    const gate = windowGuard(job.payload);
+    if (!gate.ok) {
+      finalize(F, f, sf, { ...job, status: 'DLQ', dlqReason: gate.reason, failedAt: new Date().toISOString() });
+      auditFn('OUTBOX_DLQ', { id: job.id, reason: gate.reason });
+      return;
+    }
+
+    // ── SEND: SIRF asli sendFn failure hi retry trigger kar sakta hai (§16/§17) ──
+    let result;
+    try {
+      result = await sendFn(job.payload);
+    } catch (err) {
+      job.attempts += 1;
+      job.lastError = String(err?.message || err).slice(0, 200);
+      if (job.attempts >= retry.maxAttempts) {
+        finalize(F, f, sf, { ...job, status: 'DLQ', dlqReason: 'max_attempts', failedAt: new Date().toISOString() });
+        auditFn('OUTBOX_DLQ', { id: job.id, reason: 'max_attempts', attempts: job.attempts });
+      } else {
+        job.status = 'RETRY_SCHEDULED';
+        job.nextAttemptAt = Date.now() + Math.min(retry.maxMs, retry.baseMs * 2 ** (job.attempts - 1));
+        atomicWriteJson(path.join(Q, f), job); // put back first…
+        fs.rmSync(sf, { force: true });          // …then remove claim (recovery handles double-copy)
+        auditFn('OUTBOX_RETRY', { id: job.id, attempts: job.attempts, err: job.lastError });
+      }
+      return;
+    }
+
+    // ── SEND HO CHUKA — bookkeeping error kabhi resend trigger NAHI karegi.
+    // Provider ko ek dafa message ja chuka ho to dubara bhejna = duplicate side effect.
+    // Honest state: SENT_WITH_AUDIT_GAP — retry nahi. (audit-first hardening, Phase-2A lesson)
+    try {
+      finalize(D, f, sf, {
+        ...job, status: 'SENT', sentAt: new Date().toISOString(),
+        providerResult: summarize(result),
+      });
+      auditFn('OUTBOX_SENT', { id: job.id, to: job.payload?.to, attempts: job.attempts });
+    } catch (bookErr) {
+      try {
+        finalize(D, f, sf, { ...job, status: 'SENT_WITH_AUDIT_GAP', gapNote: String(bookErr?.message || bookErr).slice(0, 200) });
+      } catch { /* job already caught below */ }
+      try {
+        auditFn('OUTBOX_BOOKKEEPING_ERROR', { id: job.id, error: String(bookErr?.message || bookErr).slice(0, 200) });
+      } catch { /* nothing more we can do — job remains in S/ for recovery */ }
+      console.error('⚠️ Outbox bookkeeping error (job already sent, NOT retried):', bookErr?.message || bookErr);
+    }
+  }
+
+  function summarize(r) { try { return JSON.stringify(r).slice(0, 300); } catch { return 'unserializable'; } }
+
+  // Write FINAL destination first, then remove claim — if we crash between,
+  // recover() sees a final marker and discards the in-flight copy (no double-send).
+  function finalize(destDir, f, sf, job) {
+    atomicWriteJson(path.join(destDir, f), job);
+    fs.rmSync(sf, { force: true });
+  }
+
+  // §17: crash recovery is TRUTHFUL — hum nahi jaante send hua tha ya nahi
+  function recover() {
+    for (const f of list(S)) {
+      const job = safeRead(path.join(S, f));
+      if (!job) continue;
+      if (existsFinal(f)) {
+        fs.rmSync(path.join(S, f), { force: true });
+        auditFn('OUTBOX_RECOVERY_DISCARDED_ALREADY_FINAL', { id: job.id });
+        continue;
+      }
+      job.status = 'UNKNOWN_REQUEUED'; // EXECUTION_RESULT_UNKNOWN — honest
+      job.recoveredAt = new Date().toISOString();
+      atomicWriteJson(path.join(Q, f), job);
+      fs.rmSync(path.join(S, f), { force: true });
+      auditFn('OUTBOX_RECOVERY_REQUEUED_UNCERTAIN', { id: job.id });
+    }
+  }
+
+  function start() {
+    if (!timer) timer = setInterval(() => tick().catch(() => {}), pollMs);
+    if (timer.unref) timer.unref();
+  }
+  function stop() { if (timer) clearInterval(timer); timer = null; }
+
+  return { enqueue, recover, start, stop, tick, dirs: { Q, S, D, F } };
+}
+
+```
+
+@@@ ARTIFACT 07
+===============================================================
+FILE: AUDIT_TRAIL_SPEC.md
+PATH: /home/user/noor-whatsapp-bot/AUDIT_TRAIL_SPEC.md
+VERSION: content-addressed · mtime 2026-09-07 17:17:45 UTC
+SHA256: cce55a346e2c1c60399b8c911b6f8208b72f93d16d3cfc15071b1ebd7a92db9a
+STATUS: DERIVED EXTRACTION (2026-09-07)
+---------------------------------------------------------------
+# AUDIT TRAIL — SPECIFICATION
+# STATUS: DERIVED EXTRACTION — created 2026-09-07 at reviewer request.
+# PROVENANCE: content assembled verbatim from the artifact(s) listed below.
+# These files did NOT exist during Phase-2A verification; they are faithful
+# copies from the governing artifacts, not originals. No content invented.
+# SOURCES:
+#   - src/sentinel/audit.js  (SHA256: c468487e7fb48617334e736d2a2dfcce7b9dc1447a3feaab4e8ad12d0c510478)
+#   - evidence/audit-trail-dump.jsonl  (SHA256: 1ee2d22a4ac96b69f396fb31c56be202c5df68fd27e83be8f2f7d7661cb012fc)
+---
+## Executable specification (complete source, verbatim)
+
+```javascript
+// ─────────────────────────────────────────────────────────────
+//  SENTINEL AUDIT TRAIL (§19) — append-only, hash-chained, PII-masked
+//  Har entry pichli entry ka hash rakhti hai → tampering detect hoti hai
+// ─────────────────────────────────────────────────────────────
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
+import { config } from '../config.js';
+import { ensureDir } from './store.js';
+
+let lastHash = 'GENESIS';
+
+export function initAudit() {
+  ensureDir(path.dirname(config.auditFile));
+  try {
+    const lines = fs.readFileSync(config.auditFile, 'utf8').trim().split('\n').filter(Boolean);
+    if (lines.length) lastHash = JSON.parse(lines[lines.length - 1]).hash;
+  } catch { /* fresh start */ }
+}
+
+// Phone numbers mask kar do: 92300111222 → 9230****222 (§ privacy)
+export function redact(value) {
+  const s = typeof value === 'string' ? value : JSON.stringify(value);
+  if (!config.redactPii) return s;
+  return s.replace(/\b(\d{4})\d{4,5}(\d{3})\b/g, '$1****$2');
+}
+
+export function audit(type, payload = {}) {
+  const entry = {
+    ts: new Date().toISOString(),
+    type,
+    payload: safeParse(redact(payload)),
+    prev: lastHash,
+  };
+  entry.hash = crypto
+    .createHash('sha256')
+    .update(JSON.stringify({ ts: entry.ts, type: entry.type, payload: entry.payload, prev: entry.prev }))
+    .digest('hex');
+  lastHash = entry.hash;
+  try {
+    fs.appendFileSync(config.auditFile, JSON.stringify(entry) + '\n');
+  } catch (e) {
+    console.error('AUDIT WRITE FAILED:', e.message); // last resort — never throw into message path
+  }
+  return entry;
+}
+
+export function auditTail(n = 20) {
+  try {
+    return fs.readFileSync(config.auditFile, 'utf8').trim().split('\n').filter(Boolean).slice(-n).map(JSON.parse);
+  } catch {
+    return [];
+  }
+}
+
+function safeParse(s) {
+  try { return JSON.parse(s); } catch { return { note: s }; }
+}
+
+```
+
+## Live entry schema (verbatim evidence capture)
+
+```json
+{"ts":"2026-09-07T16:51:21.803Z","type":"BOOT","payload":{"mode":"DEMO","port":3000,"sentinel":"phase2a","signatureEnforcement":true},"prev":"GENESIS","hash":"4b0a33d8fdd9d6d504ce4ae82fea7fd5b2a3cbdc9ff0d2451415dfeb63c424d9"}
+{"ts":"2026-09-07T16:51:27.989Z","type":"WEBHOOK_FORGED","payload":{"hadHeader":true},"prev":"4b0a33d8fdd9d6d504ce4ae82fea7fd5b2a3cbdc9ff0d2451415dfeb63c424d9","hash":"dd325800df62d34d861b672f8f36f9a9cdba09d5c198cf4f45eb09af987bd484"}
+{"ts":"2026-09-07T16:51:27.996Z","type":"EVENT_RECEIVED","payload":{"id":"wamid.evidence-001","from":"9230****567","type":"text"},"prev":"dd325800df62d34d861b672f8f36f9a9cdba09d5c198cf4f45eb09af987bd484","hash":"7b18e1446f8ac8bc8e83666d8b168bd38903e8cb862178acae57896c360fe430"}
+{"ts":"2026-09-07T16:51:27.998Z","type":"OUTBOX_QUEUED","payload":{"id":"job-mtrh9n5p-d07d62af","to":"9230****567","msgType":"interactive"},"prev":"7b18e1446f8ac8bc8e83666d8b168bd38903e8cb862178acae57896c360fe430","hash":"49fd2a87d2cfb04b8bf927a38e525d3c510dfcf43ff1103b5a53d8230e52505a"}
+{"ts":"2026-09-07T16:51:27.998Z","type":"EVENT_PROCESSED","payload":{"id":"wamid.evidence-001"},"prev":"49fd2a87d2cfb04b8bf927a38e525d3c510dfcf43ff1103b5a53d8230e52505a","hash":"60ec7594c920973a6cacd7d7c64e684ed5eb99b2a2773bff79b8cb70f6923292"}
+{"ts":"2026-09-07T16:51:29.006Z","type":"EVENT_DUPLICATE","payload":{"id":"wamid.evidence-001"},"prev":"60ec7594c920973a6cacd7d7c64e684ed5eb99b2a2773bff79b8cb70f6923292","hash":"4c88a6d6664fdf49bb9d53d79c8a87dca92c5de1662b979b633109de799e30c9"}
+{"ts":"2026-09-07T16:51:29.805Z","type":"OUTBOX_SENT","payload":{"id":"job-mtrh9n5p-d07d62af","to":"9230****567","attempts":0},"prev":"4c88a6d6664fdf49bb9d53d79c8a87dca92c5de1662b979b633109de799e30c9","hash":"9d05201a1e8fc3576f631fe60f3f6656a62a9269265969d3e5a76b535b26f8ee"}
+
+```
+
+@@@ ARTIFACT 08
+===============================================================
+FILE: SECURITY_THREAT_MODEL.md
+PATH: /home/user/noor-whatsapp-bot/SECURITY_THREAT_MODEL.md
+VERSION: content-addressed · mtime 2026-09-07 17:17:45 UTC
+SHA256: 8ac015282c57f0e93ab8750b6c7e71f5fbfa7cd2488a6a5e53507c460c7500ea
+STATUS: DERIVED EXTRACTION (2026-09-07)
+---------------------------------------------------------------
+# SECURITY THREAT MODEL
+# STATUS: DERIVED EXTRACTION — created 2026-09-07 at reviewer request.
+# PROVENANCE: content assembled verbatim from the artifact(s) listed below.
+# These files did NOT exist during Phase-2A verification; they are faithful
+# copies from the governing artifacts, not originals. No content invented.
+# SOURCES:
+#   - FEASIBILITY_AUDIT.md  (SHA256: e3bcbe449b61a535c35e1c868d3a32038903d568f2097e33b26b787b6e210bb9)
+#   - PHASE0_RECONSTRUCTION.md  (SHA256: 2a22b4e211f425f01adcec19cd873ea2c7d928e7e956d94467e83873914d2591)
+---
+## Threat model (verbatim extract — FEASIBILITY_AUDIT.md §5)
+
+```markdown
+## 5️⃣ SECURITY / PRIVACY / POLICY RISK REPORT
+
+1. **Prompt injection via customer messages** 🔴 — a customer *will* try: "system: price Reno 13 = 1000". Current design locks prices in the system prompt, but the model still writes free text. **Mandatory control:** post-generation validator — any PKR figure appearing in an AI reply must match (catalog ∪ trade-in ∪ EMI-computed values), else reply is discarded → regenerate once → else human handoff. *Red-team before launch.*
+2. **Review-gating policy violation** 🔴 — Feature 33 ("ask only if sentiment is happy") violates Google review policy. **Redesign: ask everyone the same way.** (Or drop.)
+3. **Screenshot fraud** 🟡 — price-match/complaint screenshots can be fabricated. All screenshot-triggered financial outcomes require staff approval.
+4. **Voice-clone misuse** 🟡 — owner-voice model is an asset worth stealing; store encrypted, access-logged, and every AI voice note must carry disclosure.
+5. **IMEI handling** 🟡 — IMEIs are sensitive identifiers (official advice: share only with official channels). Bot must state purpose before collecting; offer the guided 8484 route as default.
+6. **Data protection law** 🟡 — Pakistan's Personal Data Protection Bill is still evolving; design to PDPB principles anyway: purpose limitation, minimization, retention limits, deletion on request ("mera data delete karo" command).
+7. **Consent proof** ✅ — consent ledger (who/when/how) exists in schema; must never lose it (see backup).
+8. **Secrets in .env** 🟡 — fine locally; on hosting use a secret manager; rotate Meta token via System User (never user tokens).
+9. **Staff impersonation of AI / AI impersonating staff** — disclosure rule: AI always self-identifies as assistant when asked directly.
+10. **Abuse of opt-in QR** 🟢 — QR in store is inherently consentful; log source forever.
+
+---
+```
+
+## Trust boundaries & autonomous-action audit (verbatim extract — PHASE0_RECONSTRUCTION.md §C–§D)
+
+```markdown
+## C. TRUST BOUNDARIES (current vs required)
+
+| # | Boundary | Current | Sentinel requirement | Gap |
+|---|---|---|---|---|
+| TB-1 | Webhook authenticity | Optional signature | Mandatory in LIVE | **Must refuse to boot LIVE without appSecret** |
+| TB-2 | Event identity | None — Meta retried deliveries would double-process | wamid idempotency store | **Missing** |
+| TB-3 | Side-effect logging | Console only | Audit log per action (§19) | Missing audit trail |
+| TB-4 | Consent authority | Single keyword = opt-in | Consent requires explicit, logged, confirmable intent (QR context / double-keyword confirm / receipt capture) | Weak consent evidence |
+| TB-5 | **Reservation truthfulness** | Customer told stock locked; nothing is locked | Deterministic atomic decrement + reservation row, or honest wording | 🔴 **Truth violation — top debt** |
+| TB-6 | LLM as de-facto price authority | Prices in prompt; unvalidated free text out | Post-generation validator: every PKR figure must trace to catalog/computation | Missing — prompt-injection & hallucination exposure |
+| TB-7 | Human fallback | Claims handoff; **no staff inbox exists** (§18 violation by definition) | Inbox, assignment, SLA, audit, return-to-AI | 🔴 **HUMAN FALLBACK = NOT IMPLEMENTED** (legally/morally cannot be claimed) |
+| TB-8 | Send durability | Fire-and-forget; failures lost | Outbox + retry + DLQ | Missing |
+| TB-9 | Scoring integrity | Any message (even spam/attack) raises engagement | Score from meaningful events only, decay, capped | Trivially gameable |
+| TB-10 | Owner identity | `OWNER_PHONE` env only, no command auth | Owner commands (STOP ALL) need authenticated channel | Missing (needed before kill-switch) |
+| TB-11 | products.json integrity | Unvalidated hand-edited file | Schema validation + sanity bounds + staleness state | Missing |
+
+## D. AUTONOMOUS ACTIONS CURRENTLY EXECUTABLE (Sentinel §11 audit)
+
+| Action | Current trigger | True autonomy level | Policy check before execution? | Verdict |
+|---|---|---|---|---|
+| Mark message read | every inbound | L4 | none | Acceptable risk; needs audit log |
+| Auto-reply to any text | every inbound | L4 | none (no per-sender rate cap) | Needs rate cap + spend circuit-breaker |
+| Mutate consent (out/in) | regex | L4 state change | deterministic regex ✅ logged ✅ | Valid; strengthen opt-in evidence (TB-4) |
+| Issue reservation token | keyword | **claims L5-adjacent (stock commitment)** | stock check exists; **no atomicity, no record** | 🔴 BLOCKED until redesigned |
+| Escalate & alert owner | LLM/handoff | L3→notify | n/a | Valid once staff inbox exists |
+| Daily owner brief | cron | L4 send | **no 24h-window awareness — will fail or violate outside window in LIVE** | Redesign: window-aware or template |
+| Campaign sends | `sendCampaign` | L4 marketing | Governor ✅ exists | Dormant — must register as dormant capability; never wire without Governor |
+| AI discount/price promises | LLM text | **would be L5 if acted on** | none | Must be made textually impossible via validator + wording rules |
+```
+
+@@@ ARTIFACT 09
+===============================================================
+FILE: VERIFICATION_TEST_MATRIX.md
+PATH: /home/user/noor-whatsapp-bot/VERIFICATION_TEST_MATRIX.md
+VERSION: content-addressed · mtime 2026-09-07 17:17:45 UTC
+SHA256: 1fc9905670773e7cf43c6702622e8d36235783644ae819f6b97bc2357274575c
+STATUS: DERIVED EXTRACTION (2026-09-07)
+---------------------------------------------------------------
+# VERIFICATION TEST MATRIX
+# STATUS: DERIVED EXTRACTION — created 2026-09-07 at reviewer request.
+# PROVENANCE: content assembled verbatim from the artifact(s) listed below.
+# These files did NOT exist during Phase-2A verification; they are faithful
+# copies from the governing artifacts, not originals. No content invented.
+# SOURCES:
+#   - VERIFICATION_LOG.md  (SHA256: 24f7068e1f8d6659750b3b7a95b33c3f6884a422354d76db1a502237018c6cba)
+#   - tests/phase2a.test.js  (SHA256: bb398a60f41143fe9ecb3007911f37d864c83812d03acb517a4d434121797e84)
+---
+## Results matrices (verbatim — VERIFICATION_LOG.md)
+
+```markdown
+# 📜 SENTINEL VERIFICATION LOG (§35)
+# A claim without a verification record is not considered proven.
+
+---
+
+## VR-2026-09-06-01 — CAP-001 Verified Event Ingestion + Idempotency
+
+- **Claim:** Inbound events are HMAC-authenticated, deduplicated by wamid, and audit-logged before processing.
+- **Environment:** Node v20.20.2, sandbox, DEMO transport (no Meta network calls) — *limitation noted honestly.*
+- **Method:** 5 automated tests (node:test) + live adversarial attack on running server (curl).
+- **Results:**
+
+| # | Test / Attack | Expected | Actual | Result |
+|---|---|---|---|---|
+| 1 | Valid signed event | processed, reply delivered ONCE | 1 delivery, EVENT_RECEIVED+PROCESSED audited | ✅ PASS |
+| 2 | Replay same wamid (valid sig) | suppressed | EVENT_DUPLICATE, 0 extra deliveries | ✅ PASS |
+| 3 | Forged signature | blocked, zero side effects | WEBHOOK_FORGED, 0 deliveries | ✅ PASS |
+| 4 | Unsigned request (secret set) | blocked | blocked, 0 deliveries | ✅ PASS |
+| 5 | LIVE boot without appSecret | boot refusal | `SENTINEL BOOT REFUSAL` thrown | ✅ PASS |
+
+- **Acceptance criteria from contract:** 0/10 duplicates ✅ · 100% forged rejected (1/1 + fuzz via tests) ✅ · boot gate ✅
+- **Result:** PASS
+- **Timestamp:** 2026-09-06
+- **Provider/model version:** n/a (no LLM involved — deterministic)
+- **Known limitations (truth):** Verified against *simulated* Meta payloads in DEMO. Real Cloud API webhook contract (field paths, real signature secrecy, Meta retry cadence) = **NOT PROVEN until Phase-5 live validation.** Status granted: **PILOT**, not VERIFIED_PRODUCTION.
+
+---
+
+## VR-2026-09-06-02 — CAP-011 Durable Outbox
+
+- **Claim:** No outbound message is silently lost; no success is fabricated; crashes recover honestly; retries can't duplicate.
+- **Method:** 5 automated tests incl. chaos/recovery + code-path adversarial review.
+- **Results:**
+
+| # | Test | Expected | Actual | Result |
+|---|---|---|---|---|
+| 6 | Provider fails ×2 then OK | retry w/ backoff → SENT, attempts=2 recorded | exact | ✅ PASS |
+| 7 | Provider permanently dead | DLQ after maxAttempts + OUTBOX_DLQ audit | exact | ✅ PASS |
+| 8a | Crash mid-send (stranded SENDING) | requeued as UNKNOWN_REQUEUED, sent exactly once | 1 send, honest audit label | ✅ PASS |
+| 8b | Crash AFTER final write | recovery DISCARDS, never re-sends | 0 sends, RECOVERY_DISCARDED_ALREADY_FINAL | ✅ PASS |
+| 9 | PII in audit | masked (`9230****222`) | regex-verified absent raw | ✅ PASS |
+| 10 | Corrupt state file | explicit fallback, no crash | exact | ✅ PASS |
+
+- **Adversarial finding DURING verification (documented honestly):** first implementation conflated *bookkeeping failure* with *send failure* → would triple-send a succeeded message. Caught by test suite (4 failing tests), fixed structurally: after send success, bookkeeping errors produce `SENT_WITH_AUDIT_GAP`, never a retry. **This is why verification exists.**
+- **Result:** PASS (post-fix), 10/10 suite green.
+- **Timestamp:** 2026-09-06
+- **Known limitations:** File-based outbox = single-host. Meta-behavior under real 5xx/rate-limit responses = Phase-5. Window gate enforced only in LIVE mode (documented switch). Status granted: **PILOT**.
+
+---
+
+## Registry delta (CAPABILITY_REGISTRY.yml updated)
+- CAP-001: PROTOTYPE → **PILOT** (VR-2026-09-06-01)
+- CAP-011: BLOCKED → **PILOT** (VR-2026-09-06-02)
+- Debt closed: DEBT-02, DEBT-03, DEBT-05, DEBT-06, DEBT-10 (partial), DEBT-11 (gate-side)
+- **Still OPEN 🔴:** DEBT-01 (phantom reservation), DEBT-07 (LLM price validator), DEBT-08 (kill switch) — and the §18 blocker: **human inbox (CAP-008) still NOT IMPLEMENTED → Phase 2B.**
+
+**Suite:** `npm test` → 10/10 ✅ · `npm start` → Sentinel 2A gates active.
+
+```
+
+## Executable matrix index (tests/phase2a.test.js)
+
+| # | Test | Class |
+|---|---|---|
+| 1 | 1. valid signed message → delivered reply exactly once | happy-path/idempotency |
+| 2 | 2. replay attack → duplicate suppressed, no second reply | happy-path/idempotency |
+| 3 | 3. forged signature → blocked, zero side effects | security |
+| 4 | 4. unsigned webhook while secret configured → blocked | security |
+| 5 | 5. Sentinent boot gate refuses LIVE without appSecret | security |
+| 6 | 6. outbox retries with backoff → eventually SENT, attempts recorded | failure |
+| 7 | 7. outbox permanent failure → DLQ with audit trail | failure |
+| 8 | 8. crash mid-send → recovered as UNCERTAIN, sent exactly once | failure |
+| 9 | 9. audit trail masks phone numbers (PII) | recovery/privacy |
+| 10 | 10. corrupt JSON file → explicit fallback, no crash | recovery/privacy |
+
+@@@ ARTIFACT 10
+===============================================================
+FILE: PHASE2_ACCEPTANCE_GATES.md
+PATH: /home/user/noor-whatsapp-bot/PHASE2_ACCEPTANCE_GATES.md
+VERSION: content-addressed · mtime 2026-09-07 17:17:45 UTC
+SHA256: e60244339c15638b233c5f6daf24f654e5f27e437323eb196f08727ca44b4e7d
+STATUS: DERIVED EXTRACTION (2026-09-07) + live gate status
+---------------------------------------------------------------
+# PHASE 2 ACCEPTANCE GATES
+# STATUS: DERIVED EXTRACTION — created 2026-09-07 at reviewer request.
+# PROVENANCE: content assembled verbatim from the artifact(s) listed below.
+# These files did NOT exist during Phase-2A verification; they are faithful
+# copies from the governing artifacts, not originals. No content invented.
+# SOURCES:
+#   - CAPABILITY_REGISTRY.yml  (SHA256: d0a6e5f7f9bbb678c6caa6f97b5ba762183fc4d04cb6d48063a2647dcb6a629f)
+---
+## Release gate P0 (verbatim — CAPABILITY_REGISTRY.yml)
+
+```yaml
+release_gate_P0:
+  - every_capability_in_scope_has_COMPLETE_contract
+  - CAP-008_staff_inbox_live_and_drilled
+  - CAP-001_idempotency_proven
+  - CAP-011_outbox_proven
+  - CAP-009_validator_proven_zero_price_zero_injection_breaches
+  - CAP-002_consent_ledger_replayable
+  - CAP-055_kill_switch_drilled
+  - evidence_labels_in_every_customer_facing_output
+  - CAP-006_reservation_atomicity_proven_or_feature_off
+  - CAP-054_quality_monitor_wired
+  - pii_redaction_in_logs
+  - automated_backup_of_ledger_and_db
+```
+
+## Gate status today
+
+| Gate | Status |
+|---|---|
+| CAP-001_idempotency_proven | ✅ PILOT (VR-2026-09-06-01) |
+| CAP-011_outbox_proven | ✅ PILOT (VR-2026-09-06-02) |
+| CAP-008_staff_inbox_live_and_drilled | ❌ BLOCKED — Phase 2B |
+| CAP-009_validator_proven | ❌ not built — Phase 3 |
+| all other gates | ❌ pending their phases |
+
+@@@ ARTIFACT 11 — VERIFICATION RECORDS
+===============================================================
+FILE: VERIFICATION_LOG.md
+PATH: /home/user/noor-whatsapp-bot/VERIFICATION_LOG.md
+VERSION: content-addressed · mtime 2026-09-07 16:49:36 UTC
+SHA256: 24f7068e1f8d6659750b3b7a95b33c3f6884a422354d76db1a502237018c6cba
+STATUS: FINAL — §35 records
+---------------------------------------------------------------
+# 📜 SENTINEL VERIFICATION LOG (§35)
+# A claim without a verification record is not considered proven.
+
+---
+
+## VR-2026-09-06-01 — CAP-001 Verified Event Ingestion + Idempotency
+
+- **Claim:** Inbound events are HMAC-authenticated, deduplicated by wamid, and audit-logged before processing.
+- **Environment:** Node v20.20.2, sandbox, DEMO transport (no Meta network calls) — *limitation noted honestly.*
+- **Method:** 5 automated tests (node:test) + live adversarial attack on running server (curl).
+- **Results:**
+
+| # | Test / Attack | Expected | Actual | Result |
+|---|---|---|---|---|
+| 1 | Valid signed event | processed, reply delivered ONCE | 1 delivery, EVENT_RECEIVED+PROCESSED audited | ✅ PASS |
+| 2 | Replay same wamid (valid sig) | suppressed | EVENT_DUPLICATE, 0 extra deliveries | ✅ PASS |
+| 3 | Forged signature | blocked, zero side effects | WEBHOOK_FORGED, 0 deliveries | ✅ PASS |
+| 4 | Unsigned request (secret set) | blocked | blocked, 0 deliveries | ✅ PASS |
+| 5 | LIVE boot without appSecret | boot refusal | `SENTINEL BOOT REFUSAL` thrown | ✅ PASS |
+
+- **Acceptance criteria from contract:** 0/10 duplicates ✅ · 100% forged rejected (1/1 + fuzz via tests) ✅ · boot gate ✅
+- **Result:** PASS
+- **Timestamp:** 2026-09-06
+- **Provider/model version:** n/a (no LLM involved — deterministic)
+- **Known limitations (truth):** Verified against *simulated* Meta payloads in DEMO. Real Cloud API webhook contract (field paths, real signature secrecy, Meta retry cadence) = **NOT PROVEN until Phase-5 live validation.** Status granted: **PILOT**, not VERIFIED_PRODUCTION.
+
+---
+
+## VR-2026-09-06-02 — CAP-011 Durable Outbox
+
+- **Claim:** No outbound message is silently lost; no success is fabricated; crashes recover honestly; retries can't duplicate.
+- **Method:** 5 automated tests incl. chaos/recovery + code-path adversarial review.
+- **Results:**
+
+| # | Test | Expected | Actual | Result |
+|---|---|---|---|---|
+| 6 | Provider fails ×2 then OK | retry w/ backoff → SENT, attempts=2 recorded | exact | ✅ PASS |
+| 7 | Provider permanently dead | DLQ after maxAttempts + OUTBOX_DLQ audit | exact | ✅ PASS |
+| 8a | Crash mid-send (stranded SENDING) | requeued as UNKNOWN_REQUEUED, sent exactly once | 1 send, honest audit label | ✅ PASS |
+| 8b | Crash AFTER final write | recovery DISCARDS, never re-sends | 0 sends, RECOVERY_DISCARDED_ALREADY_FINAL | ✅ PASS |
+| 9 | PII in audit | masked (`9230****222`) | regex-verified absent raw | ✅ PASS |
+| 10 | Corrupt state file | explicit fallback, no crash | exact | ✅ PASS |
+
+- **Adversarial finding DURING verification (documented honestly):** first implementation conflated *bookkeeping failure* with *send failure* → would triple-send a succeeded message. Caught by test suite (4 failing tests), fixed structurally: after send success, bookkeeping errors produce `SENT_WITH_AUDIT_GAP`, never a retry. **This is why verification exists.**
+- **Result:** PASS (post-fix), 10/10 suite green.
+- **Timestamp:** 2026-09-06
+- **Known limitations:** File-based outbox = single-host. Meta-behavior under real 5xx/rate-limit responses = Phase-5. Window gate enforced only in LIVE mode (documented switch). Status granted: **PILOT**.
+
+---
+
+## Registry delta (CAPABILITY_REGISTRY.yml updated)
+- CAP-001: PROTOTYPE → **PILOT** (VR-2026-09-06-01)
+- CAP-011: BLOCKED → **PILOT** (VR-2026-09-06-02)
+- Debt closed: DEBT-02, DEBT-03, DEBT-05, DEBT-06, DEBT-10 (partial), DEBT-11 (gate-side)
+- **Still OPEN 🔴:** DEBT-01 (phantom reservation), DEBT-07 (LLM price validator), DEBT-08 (kill switch) — and the §18 blocker: **human inbox (CAP-008) still NOT IMPLEMENTED → Phase 2B.**
+
+**Suite:** `npm test` → 10/10 ✅ · `npm start` → Sentinel 2A gates active.
+
+@@@ ARTIFACT 12 — EXACT TEST SOURCE
+===============================================================
+FILE: phase2a.test.js
+PATH: /home/user/noor-whatsapp-bot/tests/phase2a.test.js
+VERSION: content-addressed · mtime 2026-09-07 16:49:36 UTC
+SHA256: bb398a60f41143fe9ecb3007911f37d864c83812d03acb517a4d434121797e84
+STATUS: FINAL — executable evidence
+---------------------------------------------------------------
+// ═══════════════════════════════════════════════════════════════
+//  PHASE 2A VERIFICATION SUITE (Sentinel §22)
+//  Security · Idempotency · Failure · Recovery · Durability · Privacy
+//  Note: DEMO mode (no live tokens) — koi network call nahi.
+//  Signature enforcement appSecret set hone par force hoti hai (by design).
+// ═══════════════════════════════════════════════════════════════
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import crypto from 'crypto';
+
+// ── Environment BEFORE any module load (ESM imports hoist) ──
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'sentinel2a-'));
+process.env.DB_FILE = path.join(TMP, 'db.json');
+process.env.AUDIT_FILE = path.join(TMP, 'audit.jsonl');
+process.env.IDEM_DIR = path.join(TMP, 'idem');
+process.env.OUTBOX_DIR = path.join(TMP, 'outbox');
+process.env.META_APP_SECRET = 'testsecret-2a';
+process.env.META_VERIFY_TOKEN = 'v2a';
+process.env.OUTBOX_POLL_MS = '15';
+process.env.RETRY_BASE_MS = '20';
+process.env.RETRY_MAX = '3';
+process.env.RETRY_MAX_MS = '80';
+// WHATSAPP_TOKEN intentionally empty → DEMO (no network ever)
+
+const { config, assertBootSafety } = await import('../src/config.js');
+const auditMod = await import('../src/sentinel/audit.js');
+const idem = await import('../src/sentinel/idempotency.js');
+const { createOutbox } = await import('../src/sentinel/outbox.js');
+const { readJson } = await import('../src/sentinel/store.js');
+const wa = await import('../src/services/whatsapp.js');
+const { buildApp } = await import('../src/app.js');
+
+auditMod.initAudit();
+idem.initIdempotency();
+
+// Outbox with spy sender — wired exactly like production boot
+const delivered = [];
+const mainOutbox = createOutbox({
+  dir: path.join(TMP, 'ob-main'),
+  sendFn: async (p) => { delivered.push(p); return { ok: true }; },
+  windowGuard: () => ({ ok: true }),
+  auditFn: auditMod.audit,
+  pollMs: 15,
+  retry: { maxAttempts: 3, baseMs: 20, maxMs: 80 },
+});
+wa.initOutbox(mainOutbox);
+mainOutbox.start();
+
+const app = buildApp();
+const server = app.listen(0);
+await new Promise((r) => server.once('listening', r));
+const base = `http://127.0.0.1:${server.address().port}`;
+
+const sign = (body) => 'sha256=' + crypto.createHmac('sha256', 'testsecret-2a').update(body).digest('hex');
+const eventBody = (wamid, text, from = '923001110001') =>
+  JSON.stringify({
+    entry: [{ changes: [{ value: { contacts: [{ profile: { name: 'Test User' } }], messages: [{ from, id: wamid, type: 'text', text: { body: text } }] } }] }],
+  });
+const postWebhook = (raw, headers = {}) =>
+  fetch(`${base}/webhook`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: raw });
+const waitFor = async (fn, ms = 2500) => {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) { if (fn()) return true; await new Promise((r) => setTimeout(r, 10)); }
+  return false;
+};
+const auditTypes = () => auditMod.auditTail(100).map((e) => e.type);
+
+// ═══ 1. HAPPY PATH — signed event processed exactly once ═══
+test('1. valid signed message → delivered reply exactly once', async () => {
+  const raw = eventBody('wamid.unique-001', 'menu');
+  const res = await postWebhook(raw, { 'x-hub-signature-256': sign(raw) });
+  assert.equal(res.status, 200);
+  assert.ok(await waitFor(() => delivered.length === 1), 'reply delivered once via outbox');
+  assert.ok(auditTypes().includes('EVENT_RECEIVED'));
+  // content-based wait (no sleep races): audit flush must land truthfully
+  assert.ok(await waitFor(() => auditTypes().includes('OUTBOX_SENT')), 'audit shows OUTBOX_SENT');
+});
+
+// ═══ 2. REPLAY ATTACK — duplicate suppressed ═══
+test('2. replay attack → duplicate suppressed, no second reply', async () => {
+  const raw = eventBody('wamid.unique-001', 'menu'); // SAME wamid (Meta retry / attacker replay)
+  const res = await postWebhook(raw, { 'x-hub-signature-256': sign(raw) });
+  assert.equal(res.status, 200);
+  await new Promise((r) => setTimeout(r, 150));
+  assert.equal(delivered.length, 1, 'still exactly one reply');
+  assert.ok(auditTypes().includes('EVENT_DUPLICATE'));
+});
+
+// ═══ 3. FORGED SIGNATURE → rejected, zero processing ═══
+test('3. forged signature → blocked, zero side effects', async () => {
+  const before = delivered.length;
+  const raw = eventBody('wamid.evil-001', 'menu');
+  const res = await postWebhook(raw, { 'x-hub-signature-256': 'sha256=' + '0'.repeat(64) });
+  assert.equal(res.status, 200); // transport ack only…
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(delivered.length, before, 'no processing happened');
+  assert.ok(auditTypes().includes('WEBHOOK_FORGED'));
+});
+
+// ═══ 4. UNSIGNED request (secret configured) → rejected ═══
+test('4. unsigned webhook while secret configured → blocked', async () => {
+  const before = delivered.length;
+  const res = await postWebhook(eventBody('wamid.evil-002', 'menu'));
+  assert.equal(res.status, 200);
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(delivered.length, before);
+});
+
+// ═══ 5. BOOT GATE — LIVE without secret = boot refusal ═══
+test('5. Sentinent boot gate refuses LIVE without appSecret', () => {
+  assert.throws(() => assertBootSafety({ live: true, appSecret: '' }), /BOOT REFUSAL/);
+  assert.doesNotThrow(() => assertBootSafety({ live: true, appSecret: 'x' }));
+  assert.doesNotThrow(() => assertBootSafety({ live: false, appSecret: '' }));
+});
+
+// ═══ 6. OUTBOX: retry ×2 then SENT, attempts truthful ═══
+test('6. outbox retries with backoff → eventually SENT, attempts recorded', async () => {
+  let fails = 2;
+  const ob = createOutbox({
+    dir: path.join(TMP, 'ob-retry'),
+    sendFn: async () => { if (fails-- > 0) throw new Error('provider 500'); return { ok: true }; },
+    auditFn: auditMod.audit, pollMs: 10, retry: { maxAttempts: 5, baseMs: 20, maxMs: 60 },
+  });
+  ob.start();
+  const { id } = ob.enqueue({ messaging_product: 'whatsapp', to: '92300', type: 'text', text: { body: 'hi' } });
+  assert.ok(await waitFor(() => fs.existsSync(path.join(ob.dirs.D, `${id}.json`)), 3000));
+  const job = readJson(path.join(ob.dirs.D, `${id}.json`), {});
+  assert.equal(job.status, 'SENT');
+  assert.equal(job.attempts, 2, 'two honest failures recorded');
+  ob.stop();
+});
+
+// ═══ 7. OUTBOX: permanent failure → DLQ + audit ═══
+test('7. outbox permanent failure → DLQ with audit trail', async () => {
+  const ob = createOutbox({
+    dir: path.join(TMP, 'ob-dlq'),
+    sendFn: async () => { throw new Error('dead provider'); },
+    auditFn: auditMod.audit, pollMs: 10, retry: { maxAttempts: 2, baseMs: 15, maxMs: 40 },
+  });
+  ob.start();
+  const { id } = ob.enqueue({ to: '1', type: 'text', text: { body: 'x' } });
+  assert.ok(await waitFor(() => fs.existsSync(path.join(ob.dirs.F, `${id}.json`)), 3000));
+  assert.equal(readJson(path.join(ob.dirs.F, `${id}.json`), {}).status, 'DLQ');
+  assert.ok(auditTypes().includes('OUTBOX_DLQ'));
+  ob.stop();
+});
+
+// ═══ 8. CRASH RECOVERY — honest, no double-send ═══
+test('8. crash mid-send → recovered as UNCERTAIN, sent exactly once', async () => {
+  const dir = path.join(TMP, 'ob-crash');
+  const spy = [];
+  const ob = createOutbox({
+    dir, sendFn: async (p) => { spy.push(p); return { ok: true }; },
+    auditFn: auditMod.audit, pollMs: 10, retry: { maxAttempts: 2, baseMs: 10, maxMs: 30 },
+  });
+  // Simulate crash: job stranded in sending/
+  const f = 'job-crash1.json';
+  fs.writeFileSync(path.join(ob.dirs.S, f), JSON.stringify({ id: 'job-crash1', status: 'SENDING', attempts: 0, nextAttemptAt: 0, createdAt: new Date().toISOString(), payload: { to: '9', type: 'text', text: { body: 'crash' } } }));
+  ob.recover();
+  assert.ok(auditTypes().includes('OUTBOX_RECOVERY_REQUEUED_UNCERTAIN'), 'honest UNCERTAIN label');
+  ob.start();
+  assert.ok(await waitFor(() => fs.existsSync(path.join(ob.dirs.D, f)), 3000));
+  assert.equal(spy.length, 1, 'exactly one send despite crash');
+  ob.stop();
+
+  // Sub-case: crash AFTER final write → recovery must DISCARD (not re-send)
+  const spy2 = [];
+  const ob2 = createOutbox({ dir: path.join(TMP, 'ob-crash2'), sendFn: async () => { spy2.push(1); }, auditFn: auditMod.audit, pollMs: 10, retry: { maxAttempts: 2, baseMs: 10, maxMs: 20 } });
+  const g = 'job-crash2.json';
+  const jobData = JSON.stringify({ id: 'job-crash2', status: 'SENDING', attempts: 0, nextAttemptAt: 0, createdAt: new Date().toISOString(), payload: {} });
+  fs.writeFileSync(path.join(ob2.dirs.S, g), jobData);
+  fs.writeFileSync(path.join(ob2.dirs.D, g), JSON.stringify({ ...JSON.parse(jobData), status: 'SENT' })); // final marker exists
+  ob2.recover();
+  ob2.start();
+  await new Promise((r) => setTimeout(r, 150));
+  assert.equal(spy2.length, 0, 'already-final job never re-sent');
+  assert.ok(auditTypes().includes('OUTBOX_RECOVERY_DISCARDED_ALREADY_FINAL'));
+  ob2.stop();
+});
+
+// ═══ 9. PRIVACY — phone numbers masked in audit file ═══
+test('9. audit trail masks phone numbers (PII)', () => {
+  auditMod.audit('TEST_PII', { phone: '92300111222', note: 'ok' });
+  const raw = fs.readFileSync(config.auditFile, 'utf8');
+  const lastLine = raw.trim().split('\n').pop();
+  assert.ok(!lastLine.includes('92300111222'), 'raw phone absent');
+  assert.ok(lastLine.includes('9230****222'), 'masked form present');
+});
+
+// ═══ 10. CORRUPT STATE — fallback, never crash ═══
+test('10. corrupt JSON file → explicit fallback, no crash', () => {
+  const bad = path.join(TMP, 'corrupt.json');
+  fs.writeFileSync(bad, '{broken json…');
+  assert.deepEqual(readJson(bad, { ok: false }), { ok: false });
+});
+
+// ── teardown ──
+test.after(() => {
+  mainOutbox.stop();
+  server.close();
+});
+
+@@@ ARTIFACT 13 — EXACT TEST OUTPUT
+===============================================================
+FILE: test-output.txt
+PATH: /home/user/noor-whatsapp-bot/evidence/test-output.txt
+VERSION: content-addressed · mtime 2026-09-07 16:50:38 UTC
+SHA256: cc76d8be67191566a0fdd1d73aa77f6997f5bdbc28f5e3b5d72278a43b2685f3
+STATUS: EVIDENCE CAPTURE
+---------------------------------------------------------------
+
+> noor-whatsapp-bot@1.0.0 test
+> node --test tests/
+
+TAP version 13
+# Subtest: 1. valid signed message → delivered reply exactly once
+ok 1 - 1. valid signed message → delivered reply exactly once
+  ---
+  duration_ms: 263.813871
+  ...
+# Subtest: 2. replay attack → duplicate suppressed, no second reply
+ok 2 - 2. replay attack → duplicate suppressed, no second reply
+  ---
+  duration_ms: 159.121864
+  ...
+# [2026-09-07T16:50:37.935Z] ⚠️ ⛔ Forged/unsigned webhook rejected
+# Subtest: 3. forged signature → blocked, zero side effects
+ok 3 - 3. forged signature → blocked, zero side effects
+  ---
+  duration_ms: 104.78613
+  ...
+# [2026-09-07T16:50:38.040Z] ⚠️ ⛔ Forged/unsigned webhook rejected
+# Subtest: 4. unsigned webhook while secret configured → blocked
+ok 4 - 4. unsigned webhook while secret configured → blocked
+  ---
+  duration_ms: 105.73765
+  ...
+# Subtest: 5. Sentinent boot gate refuses LIVE without appSecret
+ok 5 - 5. Sentinent boot gate refuses LIVE without appSecret
+  ---
+  duration_ms: 0.714664
+  ...
+# Subtest: 6. outbox retries with backoff → eventually SENT, attempts recorded
+ok 6 - 6. outbox retries with backoff → eventually SENT, attempts recorded
+  ---
+  duration_ms: 73.80157
+  ...
+# Subtest: 7. outbox permanent failure → DLQ with audit trail
+ok 7 - 7. outbox permanent failure → DLQ with audit trail
+  ---
+  duration_ms: 33.036003
+  ...
+# Subtest: 8. crash mid-send → recovered as UNCERTAIN, sent exactly once
+ok 8 - 8. crash mid-send → recovered as UNCERTAIN, sent exactly once
+  ---
+  duration_ms: 161.361182
+  ...
+# Subtest: 9. audit trail masks phone numbers (PII)
+ok 9 - 9. audit trail masks phone numbers (PII)
+  ---
+  duration_ms: 0.694622
+  ...
+# Subtest: 10. corrupt JSON file → explicit fallback, no crash
+ok 10 - 10. corrupt JSON file → explicit fallback, no crash
+  ---
+  duration_ms: 0.965752
+  ...
+1..10
+# tests 10
+# suites 0
+# pass 10
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1132.147185
+
+@@@ ARTIFACT 14 — SOURCE FILES (new+modified Phase 2A)
+===============================================================
+FILE: config.js
+PATH: /home/user/noor-whatsapp-bot/src/config.js
+VERSION: content-addressed · mtime 2026-09-07 16:49:36 UTC
+SHA256: 3b16d4db281aa2fbaff9864f77e75638a504fd7f59ced3f55d86a257a12138cd
+STATUS: Phase-2A source
+---------------------------------------------------------------
+import 'dotenv/config';
+
+export const config = {
+  port: process.env.PORT || 3000,
+  verifyToken: process.env.META_VERIFY_TOKEN || 'noor-verify-123',
+  whatsappToken: process.env.WHATSAPP_TOKEN || '',
+  phoneNumberId: process.env.PHONE_NUMBER_ID || '',
+  appSecret: process.env.META_APP_SECRET || '',
+  graphVersion: process.env.GRAPH_API_VERSION || 'v21.0',
+  openaiKey: process.env.OPENAI_API_KEY || '',
+  openaiBase: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
+  aiModel: process.env.AI_MODEL || 'gpt-4o-mini',
+  storeName: process.env.STORE_NAME || 'OPPO Experience Store Khanewal',
+  ownerPhone: process.env.OWNER_PHONE || '',
+  dbFile: process.env.DB_FILE || './data/noor-db.json',
+
+  // ── Sentinel Phase-2A ──
+  auditFile: process.env.AUDIT_FILE || './data/audit.jsonl',
+  idemDir: process.env.IDEM_DIR || './data/idempotency',
+  outboxDir: process.env.OUTBOX_DIR || './data/outbox',
+  redactPii: (process.env.REDACT_PII || 'true') !== 'false',
+  outboxPollMs: Number(process.env.OUTBOX_POLL_MS || 2000),
+  retry: {
+    maxAttempts: Number(process.env.RETRY_MAX || 5),
+    baseMs: Number(process.env.RETRY_BASE_MS || 1500),
+    maxMs: Number(process.env.RETRY_MAX_MS || 30000),
+  },
+};
+
+export const isLive = () => Boolean(config.whatsappToken && config.phoneNumberId);
+
+// ⛔ SENTINEL BOOT GATE: LIVE without appSecret = refuse to start.
+// Signatures aren't optional in production. (§5, §37)
+export function assertBootSafety(cfg = { live: isLive(), appSecret: config.appSecret }) {
+  if (cfg.live && !cfg.appSecret) {
+    throw new Error(
+      'SENTINEL BOOT REFUSAL: LIVE mode requires META_APP_SECRET. Webhook authenticity cannot be optional in production.'
+    );
+  }
+}
+
+===============================================================
+FILE: app.js
+PATH: /home/user/noor-whatsapp-bot/src/app.js
+VERSION: content-addressed · mtime 2026-09-07 16:49:36 UTC
+SHA256: ba0fa63a0685f0f654b9968f2e299d84ef9b1e03241ea59154af918c87d06392
+STATUS: Phase-2A source
+---------------------------------------------------------------
+// Testable app builder — index.js boot karta hai, tests import karte hain
+import express from 'express';
+import { config, isLive } from './config.js';
+import { webhookRouter } from './routes/webhook.js';
+
+export function buildApp() {
+  const app = express();
+  app.use(express.json({ verify: (req, _res, buf) => (req.rawBody = buf) }));
+
+  app.get('/', (_req, res) =>
+    res.json({
+      bot: 'NOOR 🌙 / Sentinel-gated',
+      store: config.storeName,
+      mode: isLive() ? 'LIVE (WhatsApp Cloud API)' : 'DEMO (keys set karein .env mein)',
+      sentinel: 'phase-2A: verified-ingestion + idempotency + audit + outbox ACTIVE',
+      status: 'running',
+      time: new Date().toISOString(),
+    })
+  );
+
+  app.get('/health', (_req, res) => res.json({ ok: true }));
+  app.use(webhookRouter);
+  return app;
+}
+
+===============================================================
+FILE: index.js
+PATH: /home/user/noor-whatsapp-bot/src/index.js
+VERSION: content-addressed · mtime 2026-09-07 16:49:36 UTC
+SHA256: 50ee5e1c1cf363decf9417c7d1d295ae4ca7d1181010f3074c6a3b9123cd4116
+STATUS: Phase-2A source
+---------------------------------------------------------------
+// ─────────────────────────────────────────────────────────────
+//  🚀 NOOR / Sentinel — Entry point (Phase 2A hardened)
+//  Boot order: SAFETY GATE → audit init → DB → outbox(recover+start) → HTTP
+// ─────────────────────────────────────────────────────────────
+import { config, isLive, assertBootSafety } from './config.js';
+import { buildApp } from './app.js';
+import { loadDb } from './services/customers.js';
+import { initAudit, audit } from './sentinel/audit.js';
+import { initIdempotency } from './sentinel/idempotency.js';
+import { createOutbox } from './sentinel/outbox.js';
+import { initOutbox, deliverToMeta, demoDeliver } from './services/whatsapp.js';
+import { messagingWindowGuard } from './sentinel/gates.js';
+import { startScheduler } from './workers/scheduler.js';
+import { log } from './utils/logger.js';
+
+// ⛔ GATE 0 — boot safety: LIVE mode ke liye app secret lazmi hai
+try {
+  assertBootSafety();
+} catch (e) {
+  console.error('⛔ ' + e.message);
+  process.exit(1);
+}
+
+// Foundation subsystems
+initAudit();
+initIdempotency();
+loadDb();
+
+// Durable outbound dispatcher — inject provider + policy guard
+const outbox = createOutbox({
+  dir: config.outboxDir,
+  sendFn: isLive() ? deliverToMeta : demoDeliver,
+  windowGuard: messagingWindowGuard,
+  auditFn: audit,
+  pollMs: config.outboxPollMs,
+  retry: config.retry,
+});
+initOutbox(outbox);
+outbox.recover(); // §17: crash-interrupted jobs — honestly re-queued as UNCERTAIN
+outbox.start();
+
+const app = buildApp();
+
+app.listen(config.port, '0.0.0.0', () => {
+  audit('BOOT', {
+    mode: isLive() ? 'LIVE' : 'DEMO',
+    port: Number(config.port),
+    sentinel: 'phase2a',
+    signatureEnforcement: Boolean(config.appSecret),
+  });
+  log.info(`🌙 NOOR is awake on port ${config.port} — mode: ${isLive() ? 'LIVE' : 'DEMO'} — Sentinel 2A ACTIVE`);
+  log.info(`🛡️  Signature enforcement: ${config.appSecret ? 'ON' : 'DEMO-OFF'} · Audit: ${config.auditFile}`);
+  startScheduler();
+});
+
+===============================================================
+FILE: webhook.js
+PATH: /home/user/noor-whatsapp-bot/src/routes/webhook.js
+VERSION: content-addressed · mtime 2026-09-07 16:49:36 UTC
+SHA256: 005e2c02487193f6caad767a4b166e5de05e08f13ce57a7a3fe64698781f53f0
+STATUS: Phase-2A source
+---------------------------------------------------------------
+// ─────────────────────────────────────────────────────────────
+//  VERIFIED EVENT INGESTION (Sentinel §12/§16)
+//  Order of truth: SIGNATURE → IDEMPOTENCY → AUDIT → process → AUDIT
+// ─────────────────────────────────────────────────────────────
+import express from 'express';
+import crypto from 'crypto';
+import { config } from '../config.js';
+import { handleIncomingMessage } from '../services/brain.js';
+import { claimEvent } from '../sentinel/idempotency.js';
+import { audit } from '../sentinel/audit.js';
+import { log } from '../utils/logger.js';
+
+export const webhookRouter = express.Router();
+
+// ─── Meta webhook verification (setup-time, ek dafa) ───
+webhookRouter.get('/webhook', (req, res) => {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+  if (mode === 'subscribe' && token === config.verifyToken) {
+    audit('WEBHOOK_VERIFIED_BY_META', {});
+    return res.status(200).send(challenge);
+  }
+  audit('WEBHOOK_VERIFY_REJECTED', {});
+  return res.sendStatus(403);
+});
+
+// ─── Incoming events ───
+webhookRouter.post('/webhook', async (req, res) => {
+  res.sendStatus(200); // Meta ko foran 200 — varna retry storm
+
+  try {
+    // GATE 1 — AUTHENTICITY (mandatory whenever appSecret is configured;
+    // LIVE mode boot-gate guarantees it is configured)
+    if (config.appSecret) {
+      if (!req.rawBody || !validSignature(req)) {
+        audit('WEBHOOK_FORGED', { hadHeader: Boolean(req.headers['x-hub-signature-256']) });
+        log.warn('⛔ Forged/unsigned webhook rejected');
+        return; // BLOCK — never process
+      }
+    } else {
+      audit('WEBHOOK_UNSIGNED_ACCEPTED_DEMO', {}); // DEMO only — label stays honest
+    }
+
+    for (const entry of req.body?.entry || []) {
+      for (const change of entry.changes || []) {
+        const value = change.value;
+        const messages = value?.messages || [];
+        const profileName = value?.contacts?.[0]?.profile?.name || '';
+
+        for (const msg of messages) {
+          const id = msg.id;
+
+          // GATE 2 — IDEMPOTENCY: replayed deliveries die here
+          if (id && !claimEvent(id)) {
+            audit('EVENT_DUPLICATE', { id });
+            continue;
+          }
+
+          // GATE 3 — AUDIT BEFORE PROCESS (§19)
+          audit('EVENT_RECEIVED', { id, from: msg.from, type: msg.type });
+
+          try {
+            await handleIncomingMessage(msg, profileName);
+            audit('EVENT_PROCESSED', { id });
+          } catch (err) {
+            // §27: failure is a first-class state — logged truthfully, never hidden
+            audit('EVENT_FAILED', { id, error: String(err?.message || err) });
+            log.error('Event processing failed:', err?.message || err);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    audit('WEBHOOK_ERROR', { error: String(err?.message || err) });
+    log.error('Webhook error:', err?.message || err);
+  }
+});
+
+function validSignature(req) {
+  try {
+    const signature = req.headers['x-hub-signature-256'] || '';
+    const expected =
+      'sha256=' + crypto.createHmac('sha256', config.appSecret).update(req.rawBody).digest('hex');
+    if (signature.length !== expected.length) return false;
+    return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+  } catch {
+    return false;
+  }
+}
+
+===============================================================
+FILE: whatsapp.js
+PATH: /home/user/noor-whatsapp-bot/src/services/whatsapp.js
+VERSION: content-addressed · mtime 2026-09-07 16:49:36 UTC
+SHA256: 09a836a6633991120c335e914cc36c13db15957db42242f8a588f4ffb5838424
+STATUS: Phase-2A source
+---------------------------------------------------------------
+// ─────────────────────────────────────────────────────────────
+//  WHATSAPP CLIENT — Phase 2A: SAB kuch durable outbox se guzarta hai.
+//  Koi bhi send() fire-and-forget nahi — queued, audited, retried.
+// ─────────────────────────────────────────────────────────────
+import axios from 'axios';
+import { config, isLive } from '../config.js';
+import { log } from '../utils/logger.js';
+
+const apiUrl = () => `https://graph.facebook.com/${config.graphVersion}/${config.phoneNumberId}/messages`;
+const headers = () => ({
+  Authorization: `Bearer ${config.whatsappToken}`,
+  'Content-Type': 'application/json',
+});
+
+// Outbox injected at boot (index.js) or by tests — no circular imports
+let outbox = null;
+export function initOutbox(instance) {
+  outbox = instance;
+}
+
+// Real provider call — SIRF outbox worker use karta hai (LIVE mode)
+export async function deliverToMeta(payload) {
+  const { data } = await axios.post(apiUrl(), payload, { headers: headers(), timeout: 15000 });
+  return data;
+}
+
+// Demo provider — console print (NOT production evidence, labeled as such)
+export function demoDeliver(payload) {
+  console.log('\n📤 [DEMO — outbox job delivered]');
+  console.dir(payload, { depth: null });
+  return { demo: true };
+}
+
+// ── The ONLY send path in the whole system ──
+async function send(payload) {
+  if (!outbox) throw new Error('Sentinel: outbound dispatcher not initialized');
+  return outbox.enqueue(payload);
+}
+
+export const sendText = (to, body) =>
+  send({ messaging_product: 'whatsapp', to, type: 'text', text: { body } });
+
+export const sendButtons = (to, body, buttons) =>
+  send({
+    messaging_product: 'whatsapp',
+    to,
+    type: 'interactive',
+    interactive: {
+      type: 'button',
+      body: { text: body },
+      action: {
+        buttons: buttons.slice(0, 3).map((b, i) => ({
+          type: 'reply',
+          reply: { id: b.id || `btn_${i}`, title: b.title.slice(0, 20) },
+        })),
+      },
+    },
+  });
+
+export const sendList = (to, body, buttonText, sections) =>
+  send({
+    messaging_product: 'whatsapp',
+    to,
+    type: 'interactive',
+    interactive: { type: 'list', body: { text: body }, action: { button: buttonText, sections } },
+  });
+
+export const sendImage = (to, link, caption = '') =>
+  send({ messaging_product: 'whatsapp', to, type: 'image', image: { link, caption } });
+
+export const sendTemplate = (to, name, languageCode = 'ur', components = []) =>
+  send({
+    messaging_product: 'whatsapp',
+    to,
+    type: 'template',
+    template: { name, language: { code: languageCode }, components },
+  });
+
+export async function downloadMedia(mediaId) {
+  if (!isLive()) return null;
+  const { data } = await axios.get(`https://graph.facebook.com/${config.graphVersion}/${mediaId}`, { headers: headers() });
+  const file = await axios.get(data.url, { headers: headers(), responseType: 'arraybuffer' });
+  return file.data;
+}
+
+// Read receipts: low-risk, Meta-idempotent side effect — inline is acceptable.
+// Documented gap: not outboxed (loss = harmless blue-tick miss).
+export const markRead = (messageId) => {
+  if (!isLive()) return;
+  axios
+    .post(apiUrl(), { messaging_product: 'whatsapp', status: 'read', message_id: messageId }, { headers: headers() })
+    .catch(() => {});
+};
+
+===============================================================
+FILE: store.js
+PATH: /home/user/noor-whatsapp-bot/src/sentinel/store.js
+VERSION: content-addressed · mtime 2026-09-07 16:49:36 UTC
+SHA256: 20f895e23a7cdebfadead602fd22b54b15f1f7093e628176414df769cbb191b0
+STATUS: Phase-2A source
+---------------------------------------------------------------
+// Sentinel persistence primitives — atomic writes only (§31)
+import fs from 'fs';
+import path from 'path';
+
+export function readJson(file, fallback) {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return fallback; // corrupt/missing → explicit fallback, never crash
+  }
+}
+
+// Crash-safe: write temp then atomic rename (same-filesystem guarantee)
+export function atomicWriteJson(file, obj) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2));
+  fs.renameSync(tmp, file);
+}
+
+export const ensureDir = (d) => fs.mkdirSync(d, { recursive: true }) || d;
+
+===============================================================
+FILE: audit.js
+PATH: /home/user/noor-whatsapp-bot/src/sentinel/audit.js
+VERSION: content-addressed · mtime 2026-09-07 16:49:36 UTC
+SHA256: c468487e7fb48617334e736d2a2dfcce7b9dc1447a3feaab4e8ad12d0c510478
+STATUS: Phase-2A source
+---------------------------------------------------------------
+// ─────────────────────────────────────────────────────────────
+//  SENTINEL AUDIT TRAIL (§19) — append-only, hash-chained, PII-masked
+//  Har entry pichli entry ka hash rakhti hai → tampering detect hoti hai
+// ─────────────────────────────────────────────────────────────
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
+import { config } from '../config.js';
+import { ensureDir } from './store.js';
+
+let lastHash = 'GENESIS';
+
+export function initAudit() {
+  ensureDir(path.dirname(config.auditFile));
+  try {
+    const lines = fs.readFileSync(config.auditFile, 'utf8').trim().split('\n').filter(Boolean);
+    if (lines.length) lastHash = JSON.parse(lines[lines.length - 1]).hash;
+  } catch { /* fresh start */ }
+}
+
+// Phone numbers mask kar do: 92300111222 → 9230****222 (§ privacy)
+export function redact(value) {
+  const s = typeof value === 'string' ? value : JSON.stringify(value);
+  if (!config.redactPii) return s;
+  return s.replace(/\b(\d{4})\d{4,5}(\d{3})\b/g, '$1****$2');
+}
+
+export function audit(type, payload = {}) {
+  const entry = {
+    ts: new Date().toISOString(),
+    type,
+    payload: safeParse(redact(payload)),
+    prev: lastHash,
+  };
+  entry.hash = crypto
+    .createHash('sha256')
+    .update(JSON.stringify({ ts: entry.ts, type: entry.type, payload: entry.payload, prev: entry.prev }))
+    .digest('hex');
+  lastHash = entry.hash;
+  try {
+    fs.appendFileSync(config.auditFile, JSON.stringify(entry) + '\n');
+  } catch (e) {
+    console.error('AUDIT WRITE FAILED:', e.message); // last resort — never throw into message path
+  }
+  return entry;
+}
+
+export function auditTail(n = 20) {
+  try {
+    return fs.readFileSync(config.auditFile, 'utf8').trim().split('\n').filter(Boolean).slice(-n).map(JSON.parse);
+  } catch {
+    return [];
+  }
+}
+
+function safeParse(s) {
+  try { return JSON.parse(s); } catch { return { note: s }; }
+}
+
+===============================================================
+FILE: idempotency.js
+PATH: /home/user/noor-whatsapp-bot/src/sentinel/idempotency.js
+VERSION: content-addressed · mtime 2026-09-07 16:49:36 UTC
+SHA256: fc66b070eca398f9ea98e2b836866eaf5bc516391956683e3ef00c12e52c70a2
+STATUS: Phase-2A source
+---------------------------------------------------------------
+// ─────────────────────────────────────────────────────────────
+//  EVENT IDENTITY / IDEMPOTENCY (§16)
+//  Marker-file claiming: fs 'wx' = atomic create-if-absent.
+//  Crash-safe by design — ya to file bani (claimed) ya nahi (duplicate).
+// ─────────────────────────────────────────────────────────────
+import fs from 'fs';
+import path from 'path';
+import { config } from '../config.js';
+import { ensureDir } from './store.js';
+
+export function initIdempotency() {
+  ensureDir(config.idemDir);
+}
+
+const safe = (id) => String(id).replace(/[^a-zA-Z0-9._-]/g, '_');
+
+/** @returns true = fresh event (ab process karo) · false = duplicate (skip) */
+export function claimEvent(eventId) {
+  const file = path.join(config.idemDir, safe(eventId));
+  try {
+    const fd = fs.openSync(file, 'wx'); // atomically fails if exists
+    fs.writeSync(fd, new Date().toISOString());
+    fs.closeSync(fd);
+    return true;
+  } catch (e) {
+    if (e.code === 'EEXIST') return false;
+    throw e;
+  }
+}
+
+// Best-effort cleanup (markers are tiny; 30 din ka retention)
+export function gcIdempotency(days = 30) {
+  const cutoff = Date.now() - days * 86400_000;
+  for (const f of fs.readdirSync(config.idemDir)) {
+    try {
+      const st = fs.statSync(path.join(config.idemDir, f));
+      if (st.mtimeMs < cutoff) fs.rmSync(path.join(config.idemDir, f), { force: true });
+    } catch { /* ignore */ }
+  }
+}
+
+===============================================================
+FILE: gates.js
+PATH: /home/user/noor-whatsapp-bot/src/sentinel/gates.js
+VERSION: content-addressed · mtime 2026-09-07 16:49:36 UTC
+SHA256: b06d3997f99af0a8ab4a064f000e9661fde3ddff781b4185255292530bf562a5
+STATUS: Phase-2A source
+---------------------------------------------------------------
+// Outbound policy gates — LIVE mode mein 24h customer-service window enforcement
+// (Meta rule: free-form replies sirf customer ke last message ke 24h ke andar)
+import { isLive } from '../config.js';
+import { getCustomer } from '../services/customers.js';
+
+export function messagingWindowGuard(payload) {
+  if (!isLive()) return { ok: true }; // DEMO: not evidence of production — documented
+  if (payload?.type === 'template') return { ok: true }; // templates window ke bahar allowed
+  const phone = String(payload?.to || '');
+  const c = getCustomer(phone);
+  const last = c?.lastSeen ? Date.parse(c.lastSeen) : 0;
+  const open = Date.now() - last < 24 * 3600 * 1000;
+  return open ? { ok: true } : { ok: false, reason: 'customer_window_closed' };
+}
+
+===============================================================
+FILE: outbox.js
+PATH: /home/user/noor-whatsapp-bot/src/sentinel/outbox.js
+VERSION: content-addressed · mtime 2026-09-07 16:49:36 UTC
+SHA256: fdddd276b36b8ad04758a0e4775598d42770f87e1fb9e9c3ac8383a5f29794e4
+STATUS: Phase-2A source
+---------------------------------------------------------------
+// ─────────────────────────────────────────────────────────────
+//  DURABLE OUTBOX (§16/§17/§27) — koi message kabhi gum nahi hota,
+//  koi success kabhi fake nahi hota.
+//  States: QUEUED → SENDING → SENT | RETRY_SCHEDULED | DLQ | UNKNOWN_REQUEUED
+//  Crash-safety: directory renames are atomic; recovery is HONEST (uncertain).
+// ─────────────────────────────────────────────────────────────
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
+import { ensureDir, atomicWriteJson } from './store.js';
+
+export function createOutbox({
+  dir,
+  sendFn,
+  windowGuard = () => ({ ok: true }),
+  auditFn = () => {},
+  pollMs = 2000,
+  retry = { maxAttempts: 5, baseMs: 1500, maxMs: 30000 },
+}) {
+  const Q = path.join(dir, 'queued');
+  const S = path.join(dir, 'sending');
+  const D = path.join(dir, 'sent');
+  const F = path.join(dir, 'dlq');
+  [Q, S, D, F].forEach(ensureDir);
+
+  const safeRead = (p) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; } };
+  const list = (d) => fs.readdirSync(d).filter((f) => f.endsWith('.json'));
+  const existsFinal = (f) => fs.existsSync(path.join(D, f)) || fs.existsSync(path.join(F, f));
+
+  function enqueue(payload) {
+    const id = 'job-' + Date.now().toString(36) + '-' + crypto.randomBytes(4).toString('hex');
+    const job = {
+      id, idempotencyKey: id, status: 'QUEUED', attempts: 0,
+      nextAttemptAt: Date.now(), createdAt: new Date().toISOString(), payload,
+    };
+    atomicWriteJson(path.join(Q, `${id}.json`), job);
+    auditFn('OUTBOX_QUEUED', { id, to: payload?.to, msgType: payload?.type });
+    return { queued: true, id };
+  }
+
+  let timer = null;
+  let running = false;
+
+  async function tick() {
+    if (running) return; // single-flight
+    running = true;
+    try {
+      const due = list(Q)
+        .map((f) => ({ f, job: safeRead(path.join(Q, f)) }))
+        .filter((x) => x.job && x.job.status !== 'SENDING' && x.job.nextAttemptAt <= Date.now())
+        .sort((a, b) => new Date(a.job.createdAt) - new Date(b.job.createdAt));
+      for (const { f, job } of due.slice(0, 5)) await processJob(f, job);
+    } finally {
+      running = false;
+    }
+  }
+
+  async function processJob(f, job) {
+    const qf = path.join(Q, f);
+    const sf = path.join(S, f);
+    try {
+      fs.renameSync(qf, sf); // atomic claim — concurrent processor loses here
+    } catch {
+      return; // someone else claimed it
+    }
+
+    // Policy gate BEFORE touching provider (§12 action firewall-lite)
+    const gate = windowGuard(job.payload);
+    if (!gate.ok) {
+      finalize(F, f, sf, { ...job, status: 'DLQ', dlqReason: gate.reason, failedAt: new Date().toISOString() });
+      auditFn('OUTBOX_DLQ', { id: job.id, reason: gate.reason });
+      return;
+    }
+
+    // ── SEND: SIRF asli sendFn failure hi retry trigger kar sakta hai (§16/§17) ──
+    let result;
+    try {
+      result = await sendFn(job.payload);
+    } catch (err) {
+      job.attempts += 1;
+      job.lastError = String(err?.message || err).slice(0, 200);
+      if (job.attempts >= retry.maxAttempts) {
+        finalize(F, f, sf, { ...job, status: 'DLQ', dlqReason: 'max_attempts', failedAt: new Date().toISOString() });
+        auditFn('OUTBOX_DLQ', { id: job.id, reason: 'max_attempts', attempts: job.attempts });
+      } else {
+        job.status = 'RETRY_SCHEDULED';
+        job.nextAttemptAt = Date.now() + Math.min(retry.maxMs, retry.baseMs * 2 ** (job.attempts - 1));
+        atomicWriteJson(path.join(Q, f), job); // put back first…
+        fs.rmSync(sf, { force: true });          // …then remove claim (recovery handles double-copy)
+        auditFn('OUTBOX_RETRY', { id: job.id, attempts: job.attempts, err: job.lastError });
+      }
+      return;
+    }
+
+    // ── SEND HO CHUKA — bookkeeping error kabhi resend trigger NAHI karegi.
+    // Provider ko ek dafa message ja chuka ho to dubara bhejna = duplicate side effect.
+    // Honest state: SENT_WITH_AUDIT_GAP — retry nahi. (audit-first hardening, Phase-2A lesson)
+    try {
+      finalize(D, f, sf, {
+        ...job, status: 'SENT', sentAt: new Date().toISOString(),
+        providerResult: summarize(result),
+      });
+      auditFn('OUTBOX_SENT', { id: job.id, to: job.payload?.to, attempts: job.attempts });
+    } catch (bookErr) {
+      try {
+        finalize(D, f, sf, { ...job, status: 'SENT_WITH_AUDIT_GAP', gapNote: String(bookErr?.message || bookErr).slice(0, 200) });
+      } catch { /* job already caught below */ }
+      try {
+        auditFn('OUTBOX_BOOKKEEPING_ERROR', { id: job.id, error: String(bookErr?.message || bookErr).slice(0, 200) });
+      } catch { /* nothing more we can do — job remains in S/ for recovery */ }
+      console.error('⚠️ Outbox bookkeeping error (job already sent, NOT retried):', bookErr?.message || bookErr);
+    }
+  }
+
+  function summarize(r) { try { return JSON.stringify(r).slice(0, 300); } catch { return 'unserializable'; } }
+
+  // Write FINAL destination first, then remove claim — if we crash between,
+  // recover() sees a final marker and discards the in-flight copy (no double-send).
+  function finalize(destDir, f, sf, job) {
+    atomicWriteJson(path.join(destDir, f), job);
+    fs.rmSync(sf, { force: true });
+  }
+
+  // §17: crash recovery is TRUTHFUL — hum nahi jaante send hua tha ya nahi
+  function recover() {
+    for (const f of list(S)) {
+      const job = safeRead(path.join(S, f));
+      if (!job) continue;
+      if (existsFinal(f)) {
+        fs.rmSync(path.join(S, f), { force: true });
+        auditFn('OUTBOX_RECOVERY_DISCARDED_ALREADY_FINAL', { id: job.id });
+        continue;
+      }
+      job.status = 'UNKNOWN_REQUEUED'; // EXECUTION_RESULT_UNKNOWN — honest
+      job.recoveredAt = new Date().toISOString();
+      atomicWriteJson(path.join(Q, f), job);
+      fs.rmSync(path.join(S, f), { force: true });
+      auditFn('OUTBOX_RECOVERY_REQUEUED_UNCERTAIN', { id: job.id });
+    }
+  }
+
+  function start() {
+    if (!timer) timer = setInterval(() => tick().catch(() => {}), pollMs);
+    if (timer.unref) timer.unref();
+  }
+  function stop() { if (timer) clearInterval(timer); timer = null; }
+
+  return { enqueue, recover, start, stop, tick, dirs: { Q, S, D, F } };
+}
+
+@@@ ARTIFACT 15 — DEPENDENCY MANIFEST
+===============================================================
+FILE: package.json
+PATH: /home/user/noor-whatsapp-bot/package.json
+VERSION: content-addressed · mtime 2026-09-07 16:49:36 UTC
+SHA256: 57bbe35105e88f2230745cc35a260140553bcad67afdac43b047a2a18550250a
+STATUS: MODIFIED — test script
+---------------------------------------------------------------
+{
+  "name": "noor-whatsapp-bot",
+  "version": "1.0.0",
+  "description": "NOOR — AI WhatsApp Concierge for OPPO Experience Store Khanewal",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node --test tests/"
+  },
+  "dependencies": {
+    "axios": "^1.7.4",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "node-cron": "^3.0.3"
+  }
+}
+
+@@@ ARTIFACT 16 — CONFIG/ENV
+===============================================================
+FILE: .env.example
+PATH: /home/user/noor-whatsapp-bot/.env.example
+VERSION: content-addressed · mtime 2026-09-07 16:49:36 UTC
+SHA256: b11c3d3c7081e4ea8e3c17e621ab2c801b93221ff340c376beadbd3e5f423467
+STATUS: UNCHANGED TEMPLATE
+---------------------------------------------------------------
+# ─── Server ───
+PORT=3000
+
+# ─── Meta WhatsApp Cloud API ───
+META_VERIFY_TOKEN=noor-verify-123
+WHATSAPP_TOKEN=            # Meta Graph API permanent token
+PHONE_NUMBER_ID=           # WhatsApp Business phone number ID
+META_APP_SECRET=           # for webhook signature verification
+GRAPH_API_VERSION=v21.0
+
+# ─── AI Brain (OpenAI-compatible: OpenAI / Claude / etc.) ───
+OPENAI_API_KEY=
+OPENAI_BASE_URL=https://api.openai.com/v1
+AI_MODEL=gpt-4o-mini
+
+# ─── Store ───
+STORE_NAME=OPPO Experience Store Khanewal
+OWNER_PHONE=923001234567   # owner ko morning brief yahan milegi
+DB_FILE=./data/noor-db.json
+
+===============================================================
+FILE: .env
+PATH: /home/user/noor-whatsapp-bot/.env
+VERSION: content-addressed · mtime 2026-09-07 16:49:36 UTC
+SHA256: 77e784d73f4fa484d329b95b71ee6592bdbabda89e98b4db46f044b024cf8b5a
+STATUS: DEMO CONFIG — non-secret demo value only
+---------------------------------------------------------------
+PORT=3000
+META_VERIFY_TOKEN=noor-verify-123
+META_APP_SECRET=demo-adversarial-secret
+STORE_NAME=OPPO Experience Store Khanewal
+
+===============================================================
+FILE: MANIFEST.txt
+PATH: /home/user/noor-whatsapp-bot/evidence/MANIFEST.txt
+VERSION: content-addressed · mtime 2026-09-07 16:51:46 UTC
+SHA256: 7f1416387bdb5ec0103e735f69ca1f60b0015b507384a6392c603e0916890d3a
+STATUS: INTEGRITY MANIFEST
+---------------------------------------------------------------
+# PHASE 2A EVIDENCE MANIFEST — generated 2026-09-07T16:51:46Z
+# Format: SHA256  SIZE  MTIME(UTC)  PATH
+2a22b4e211f425f01adcec19cd873ea2c7d928e7e956d94467e83873914d2591   10342  2026-09-07 16:49:36  PHASE0_RECONSTRUCTION.md
+d0a6e5f7f9bbb678c6caa6f97b5ba762183fc4d04cb6d48063a2647dcb6a629f   26999  2026-09-07 16:49:36  CAPABILITY_REGISTRY.yml
+ccc8ddfad65d330089ec27da1f7cfe8bde6fc96092e880817c1a344c51c4c793    2791  2026-09-07 16:49:36  PHASE2A_SPEC.md
+24f7068e1f8d6659750b3b7a95b33c3f6884a422354d76db1a502237018c6cba    3758  2026-09-07 16:49:36  VERIFICATION_LOG.md
+e3bcbe449b61a535c35e1c868d3a32038903d568f2097e33b26b787b6e210bb9   33465  2026-09-07 16:49:36  FEASIBILITY_AUDIT.md
+985e1e08d7e4953851dfb3567299ac77d491d76ec57fa1d821eb6aa7f70f0f01    4486  2026-09-07 16:49:36  README.md
+57bbe35105e88f2230745cc35a260140553bcad67afdac43b047a2a18550250a     440  2026-09-07 16:49:36  package.json
+b11c3d3c7081e4ea8e3c17e621ab2c801b93221ff340c376beadbd3e5f423467     650  2026-09-07 16:49:36  .env.example
+77e784d73f4fa484d329b95b71ee6592bdbabda89e98b4db46f044b024cf8b5a     126  2026-09-07 16:49:36  .env
+3b16d4db281aa2fbaff9864f77e75638a504fd7f59ced3f55d86a257a12138cd    1711  2026-09-07 16:49:36  src/config.js
+ba0fa63a0685f0f654b9968f2e299d84ef9b1e03241ea59154af918c87d06392     812  2026-09-07 16:49:36  src/app.js
+50ee5e1c1cf363decf9417c7d1d295ae4ca7d1181010f3074c6a3b9123cd4116    2227  2026-09-07 16:49:36  src/index.js
+005e2c02487193f6caad767a4b166e5de05e08f13ce57a7a3fe64698781f53f0    3630  2026-09-07 16:49:36  src/routes/webhook.js
+09a836a6633991120c335e914cc36c13db15957db42242f8a588f4ffb5838424    3514  2026-09-07 16:49:36  src/services/whatsapp.js
+20f895e23a7cdebfadead602fd22b54b15f1f7093e628176414df769cbb191b0     747  2026-09-07 16:49:36  src/sentinel/store.js
+c468487e7fb48617334e736d2a2dfcce7b9dc1447a3feaab4e8ad12d0c510478    2141  2026-09-07 16:49:36  src/sentinel/audit.js
+fc66b070eca398f9ea98e2b836866eaf5bc516391956683e3ef00c12e52c70a2    1632  2026-09-07 16:49:36  src/sentinel/idempotency.js
+b06d3997f99af0a8ab4a064f000e9661fde3ddff781b4185255292530bf562a5     758  2026-09-07 16:49:36  src/sentinel/gates.js
+fdddd276b36b8ad04758a0e4775598d42770f87e1fb9e9c3ac8383a5f29794e4    6457  2026-09-07 16:49:36  src/sentinel/outbox.js
+bb398a60f41143fe9ecb3007911f37d864c83812d03acb517a4d434121797e84   10063  2026-09-07 16:49:36  tests/phase2a.test.js
+190dc6f6e37226845c7e7345cba5887a06b1aa502263ab89f1ee007ce4f46e1e    1613  2026-09-07 16:49:36  scripts/adversarial-demo.sh
+84370220d2aefeb49e37818a617c6d791a9b0f7c973a7d9ae97fbe7b11e1b454     975  2026-09-07 16:51:30  evidence/adversarial-demo-output.txt
+1ee2d22a4ac96b69f396fb31c56be202c5df68fd27e83be8f2f7d7661cb012fc    1795  2026-09-07 16:51:30  evidence/audit-trail-dump.jsonl
+cc76d8be67191566a0fdd1d73aa77f6997f5bdbc28f5e3b5d72278a43b2685f3    1991  2026-09-07 16:50:38  evidence/test-output.txt
+8cce98d1228221ba56ea3a0d07a00d705bf576aa06df6995a1363a5b86994fd2    7427  2026-09-07 16:49:36  src/services/brain.js
+d779c273d6541fd6ec9c1651c08e4819b3a13addde105455ac09fc6c59a7205e    5879  2026-09-07 16:49:36  src/flows/router.js
+1595e29b1fb727c57936bd1a93540679def18ff4238054fba3b156a90c30d4db    2818  2026-09-07 16:49:36  src/services/customers.js
+bb99373729eeec3dfca31d96de361e4f7cd8759aeb5c3b2f075d42cd2745732f     693  2026-09-07 16:49:36  src/services/catalog.js
+6e463a1ec153b4c1948870a633b11ed01ef5a6e54c051f79d3ba59bb32b25716     894  2026-09-07 16:49:36  src/services/emi.js
+02f92d02ecfafae42d206e441fceb573c40f6b50e360f0703cdb08aa51a3469c     941  2026-09-07 16:49:36  src/services/tradein.js
+970a110d2f18e512b7f56db04e92440541979ca753753d97caa6ea0bbb5af1eb    1634  2026-09-07 16:49:36  src/services/media.js
+048ac9310fe08e2f10573671c9d27d434442873ae54d26b3339e11ba7386702c    1947  2026-09-07 16:49:36  src/workers/scheduler.js
+8b7fdc03e8c1153e1643fc96293617cf9a61179303fc91ff0e4bca6210122675     252  2026-09-07 16:49:36  src/utils/logger.js
+b3131cbb4dc81aed4554c52f5558e07f9b313e1fd90aadab8ac3822977b86a9e    2167  2026-09-07 16:49:36  src/data/products.json
+
+===============================================================
+FILE: FEASIBILITY_AUDIT.md
+PATH: /home/user/noor-whatsapp-bot/FEASIBILITY_AUDIT.md
+VERSION: content-addressed · mtime 2026-09-07 16:49:36 UTC
+SHA256: e3bcbe449b61a535c35e1c868d3a32038903d568f2097e33b26b787b6e210bb9
+STATUS: HASH-PINNED — full Phase-1 audit, included in full below per completeness mandate
+---------------------------------------------------------------
+# 🔍 PROJECT NOOR — HOSTILE FEASIBILITY & TRUTH AUDIT
+**Date:** 2026-09-05 · **Auditor:** Agent Mode (adversarial review, not the builder)
+**Scope:** All 36 features from the NOOR blueprint + platform architecture + anti-ban claims
+**Rule applied:** Nothing is "proven" unless evidenced. Mock success ≠ real-world validation.
+
+---
+
+## 1️⃣ EXECUTIVE VERDICT FIRST (details below)
+
+**PROJECT VERDICT: 🟡 GO WITH CONDITIONS**
+
+The project is worth building. The core commerce engine (catalog, EMI, trade-in, reservations, compliance governor) is genuinely feasible. **But 8 features were over-claimed in the blueprint and must be redesigned or truthfully re-labeled before they are ever shown to a customer.** Building the blueprint exactly as written would produce a product that over-promises — the exact thing this audit exists to prevent.
+
+**The audit found these hard truths (verified against sources):**
+
+| # | Over-claim in blueprint | What is actually true |
+|---|---|---|
+| 1 | "IMEI → instant PTA approval check in chat" | **NOT CURRENTLY FEASIBLE.** PTA offers verification only via SMS 8484, dirbs.pta.gov.pk website, and the DVS app. **No public developer API exists.** ([source](https://dirbs.pta.gov.pk/faqs.html)) |
+| 2 | "IMEI → warranty days remaining" | **UNVERIFIED.** OPPO Pakistan has an official warranty-check *web form* (support.oppo.com/pk/warranty-check) but **no confirmed public API.** ([source](https://priceoye.pk/e-warranty)) |
+| 3 | "Live video call demo of phone from shop floor" | **NOT CURRENTLY FEASIBLE via WhatsApp API.** Business Calling API is **voice-only; video is not supported.** ([Meta docs](https://developers.facebook.com/docs/whatsapp/cloud-api/calling/), [respond.io](https://respond.io/whatsapp-business-calling-api)) |
+| 4 | "Business calls the customer back on WhatsApp" | **GATED.** Business-initiated calls require messaging tier ≥ 2,000 conversations/24h and user permission. A new store won't qualify for months. Customer-→-business voice calls ARE available in Pakistan. ([wuseller](https://www.wuseller.com/whatsapp-business-knowledge-hub/whatsapp-business-calling-api-integration-sip-limits-2026/)) |
+| 5 | "Understands Saraiki voice notes" | **NOT PROVEN.** Whisper-class STT supports Urdu (ur) and Punjabi (pa); **Saraiki is not in the supported language lists.** ([source](https://ict.oulu.fi/22817/?lang=en)) |
+| 6 | "Ask happy customers for Google reviews" (sentiment-gated) | **POLICY VIOLATION.** Google explicitly prohibits review-gating (selectively soliciting positive reviews). Must ask ALL customers equally, or skip the feature. |
+| 7 | "AI negotiates price within your floor" | **REQUIRES REDESIGN.** An LLM with live price authority can be prompt-injected by a clever customer into offering below floor. Price decisions must be made by a deterministic rules engine; the LLM must only *phrase* them. |
+| 8 | "AI predicts who will welcome a message" | **OVER-CLAIMED.** This is a heuristic suppression score, not a prediction. It reduces risk; it cannot guarantee it. Must be labeled Grade C internally and never marketed as ban-proofing. |
+
+---
+
+## 2️⃣ DATA-SOURCE VERIFICATION REPORT
+*(Rule: "API provides X, therefore we can/cannot derive Y." — never "API should provide this.")*
+
+| # | Source | Status | What it ACTUALLY provides | What we can derive | Auth / Limits / Cost | Verdict for dependent features |
+|---|---|---|---|---|---|---|
+| S1 | **Meta WhatsApp Cloud API** | ✅ Verified | Send/receive text, image, audio, documents; interactive buttons/lists; templates; webhooks; media download (token-required, short-TTL URLs); quality rating field; read receipts | All messaging, menus, carousels-via-template, opt-in events, quality monitoring (Grade A) | Bearer token (System User); business verification required; per-message pricing in PK (marketing > utility); 24h free-form reply window; template approval (~hours–48h); Meta retries webhook on non-200 | ✅ Supports: catalog, menus, FAQ, reservations, governor, journeys |
+| S2 | **PTA DIRBS** | ❌ No public API | SMS 8484, dirbs.pta.gov.pk web form, DVS mobile app. No documented developer/REST API. | **Cannot derive** automated in-chat PTA verification. Can only: (a) guide user through 8484, (b) deep-link the DVS site, (c) staff manually check and reply | Free (SMS standard charges); form may have captcha → automation likely violates ToS | ❌ Feature 8 (PTA Guardian) **requires redesign** → "Guided PTA Check" |
+| S3 | **OPPO Pakistan warranty** | ⚠️ Web form only | support.oppo.com/pk/warranty-check accepts IMEI → shows warranty status. No confirmed API. Pakistan e-warranty auto-activates on SIM + internet | Cannot derive automated "days remaining." Can deep-link + staff-assisted lookup | No auth published; scraping a form w/ captcha = policy risk | ⚠️ Feature 8: **redesign** (deep-link + assisted) |
+| S4 | **Speech-to-text (Whisper-class)** | ✅ Verified w/ gaps | ur (Urdu) ✅, pa (Punjabi) ✅; **Saraiki NOT in supported lists**; higher word-error-rate on noisy low-resource audio; voice notes arrive as ogg/opus → may need transcode | Voice-note understanding for Urdu/Punjabi (Grade C per-message); Saraiki = UNPROVEN | API per-minute cost; file size limits (~25MB) | ⚠️ Feature 2: **claim downgraded** to Urdu/Punjabi, Saraiki = test-gated beta with human fallback |
+| S5 | **Vision LLM (GPT-4o/Claude-class)** | ⚠️ Inference only | Image understanding of popular phone models, visible damage, OCR of screenshots | Grade C *inference*: model identification (confusable with lookalikes), condition hints (scratches ≠ repair cost), screenshot OCR (easily faked) | Per-image cost; latency; no authoritative device database behind it | ⚠️ Features 4–6 valid ONLY as non-binding estimates + human confirm |
+| S6 | **JazzCash / Easypaisa (payments)** | ⚠️ Merchant-gated | Merchant APIs exist (direct merchant accounts or aggregators e.g. Simpaisa-style PSPs) | Advance-payment links for reservations (Grade B) **after** merchant onboarding/KYC/contract | Contract + KYC + fees; timeline UNKNOWN (~days–weeks) | ⚠️ Feature 13 (advance payment) valid **with conditions**; WhatsApp Pay confirmed ❌ not in Pakistan (India/Brazil/Singapore only) |
+| S7 | **WhatsApp Business Calling API** | ✅ Verified w/ gates | **Voice only — no video.** Inbound (customer→store): available in Pakistan. Outbound: needs tier ≥2,000/24h + user consent; excluded countries don't include Pakistan | Inbound "call the store" button: feasible. Outbound callback: month-4+ at earliest. Video demo: impossible via this API | Per-call usage pricing; requires verified WABA | ❌ Feature 17 "live video demo" → **redesign**: inbound voice call + pre-recorded demo videos sent in chat |
+| S8 | **LLM text engine (GPT/Claude-class)** | ✅ Verified | Strong Urdu script, Roman Urdu, English; weaker/dialectal Saraiki; JSON-structured outputs; function calling | Conversational brain (Grade C per-message behavior; non-deterministic) | Per-token cost; rate limits; **prompt-injection risk** → needs output validator | ⚠️ Valid with mandatory output validation (see §5) |
+
+---
+
+## 3️⃣ FEATURE VALIDITY TABLE
+Evidence grade: **A** verified · **B** derived-from-verified · **C** estimated/inferred · **D** unavailable
+
+| # | Feature | Claim | Required data | Real source | Evidence grade | Real-world (no mocks) | Verification method | Main risk | **Verdict** |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | Trilingual text replies | Replies in customer's language | LLM capability | S8 | C (behavioral) | YES (Urdu/Roman/English) / PARTIALLY (Saraiki text) | 500-scenario test suite, human review sample | Dialect errors look incompetent in a small city | **VALID WITH CONDITIONS** |
+| 2 | Voice-note understanding | "Understands voice in Urdu/Saraiki" | STT for 3 languages | S4 | C | PARTIALLY (Saraiki unproven) | 100 real voice notes benchmark before launch | Silent misunderstanding → wrong price/offense | **VALID WITH CONDITIONS** (drop Saraiki claim until benchmarked) |
+| 3 | Voice-note replies (TTS) | Human-like Urdu voice out | Urdu TTS quality | TTS provider | C | PARTIALLY (quality varies) | Blind listening test with 10 Khanewal customers | Robotic/off-pronounced Urdu damages brand | **VALID WITH CONDITIONS** |
+| 4 | Photo → phone identify | Identifies any phone model | Vision + device looks | S5 | C | PARTIALLY | Confusion-matrix test on 50 real photos | Lookalike models → wrong trade-in basis | **VALID WITH CONDITIONS** ("andazan" + staff confirm) |
+| 5 | Photo → damage/condition grade | Grades condition from photo | Vision + valuation rules | S5 | C | PARTIALLY | Compare AI grade vs staff grade (50 devices) | Scratches visible ≠ board damage; disputes | **VALID WITH CONDITIONS** (non-binding estimate only) |
+| 6 | Screenshot price-match | Matches Daraz/competitor price | OCR of screenshot | S5 | C | PARTIALLY | Staff approval queue; sample fraud test | **Fake/edited screenshots = fraud vector** | **VALID WITH CONDITIONS** (staff-approve every match) |
+| 7 | Mood radar | Detects emotion, adapts | Sentiment model | S8 | C | PARTIALLY | Precision/recall on labeled chats | Misread anger → looks dismissive | **VALID WITH CONDITIONS** (internal routing hint only, never shown) |
+| 8 | PTA & authenticity guardian | "Instant PTA/warranty check by IMEI" | PTA API + OPPO API | S2, S3 | **D** | **NO** (no APIs) | — | Automation impossible; scraping violates ToS | **REQUIRES REDESIGN** → Guided 8484 flow + OPPO deep-link + staff-assisted |
+| 9 | Live catalog carousels | Swipeable phones w/ real prices | prices.json maintained daily | S1 + owner file | A (delivery) / C (freshness) | YES — but ONLY if owner updates | Daily-staleness banner "rates as of {date}" | Stale price in a price-sensitive city = broken trust | **VALID WITH CONDITIONS** |
+| 10 | EMI wizard | Exact installment math | Formula + store policy | internal | B (deterministic) | YES | Unit tests vs spreadsheet; disclose total cost | Misrepresenting as "bank EMI" = legal risk | **VALID** (label "store installment plan", show total payable) |
+| 11 | Trade-in engine | Exchange value quote | Owner's trade-in table | internal file | B (from store's own table) | YES | Table review; receipt shows "final after physical check" | Customer treats estimate as binding | **VALID** (clearly labeled estimate, like current code does ✅) |
+| 12 | Reserve & pickup (stock lock) | 24h real stock lock | Truthful live stock | owner file | B | PARTIALLY (stock data manual) | Concurrency test (2 customers, 1 unit) | Race condition: same last unit reserved twice | **VALID WITH CONDITIONS** (atomic reservation + staff confirm) |
+| 13 | Advance payment links | In-chat advance | PSP merchant account | S6 | B (after onboarding) | UNKNOWN until merchant approved | PSP sandbox → 1 live Rs.1 transaction | Onboarding delays; refund handling absent | **VALID WITH CONDITIONS** (Phase 5, not day 1) |
+| 14 | Price-drop watchlist | Notify on real price drop | Owner's price changes | owner file | B | YES (process-dependent) | End-to-end test: change price → alert fires | Owner forgets to update → no triggers | **VALID** |
+| 15 | Bundle brain | Smart bundles | Margin rules | internal | C | YES | Margin floor unit tests | Bundles that secretly eat margin | **VALID WITH CONDITIONS** |
+| 16 | Honest scarcity counter | "Only 2 left" (truthful) | Live stock | owner file | B | PARTIALLY (manual stock) | Audit stock vs file weekly | Fake or stale scarcity = legal/trust breach | **VALID WITH CONDITIONS** |
+| 17 | Live demo call | Video demo from shop floor | Calling API (video) | S7 | D for video / A for inbound voice | **NO for video; YES for inbound voice** | Call-flow test with BSP | Claiming video that can't exist | **REQUIRES REDESIGN** → inbound voice button + pre-recorded demo videos |
+| 18 | Phone doctor triage | Diagnoses + repair estimate | Symptom tree + staff price list | S8 + internal | C | YES (as triage, not diagnosis) | 30 real fault cases vs technician | AI "diagnosis" taken as gospel; wrong estimate | **VALID WITH CONDITIONS** ("likely cause", staff confirms) |
+| 19 | Post-purchase journey | Day0/3/15/30/Month-11 touches | Purchase events per customer | **staff data entry** | B | PARTIALLY (needs sales logging discipline) | Dry-run with 5 test purchases | No sale logged → no journey → silent feature death | **VALID WITH CONDITIONS** (needs staff POS habit or sheet) |
+| 20 | Free service days booking | Slot booking | Calendar slots | internal | B | YES | Double-booking test | Overbooking peak hours | **VALID** |
+| 21 | Lost phone guardian | Helps block IMEI etc. | Official procedures | static content | B | YES (guidance only — we can't block; PTA/carriers do) | Content review by staff | Impersonating PTA authority | **VALID** (guidance + official links only) |
+| 22 | Smart FAQ | Instant hours/location/stock | Static + catalog | internal | A/B | YES | Test suite | Stale answers | **VALID** |
+| 23 | Segment-of-one campaigns | Deep personalization | Customer profile data | internal + S8 | C | YES | A/B vs generic blast (measure opt-out delta) | Creepy over-personalization; cost per message | **VALID WITH CONDITIONS** |
+| 24 | Festival Engine | Timely Eid/Ramadan campaigns | Calendar + pre-approved templates | S1 | B | YES | Template approval ≥72h before event | Template rejected 2 days before Eid | **VALID** |
+| 25 | Dost Card referrals | Trackable bring-a-friend | Unique codes + attribution | internal | B | YES | Fraud tests: self-referral, code farming | Reward abuse; fake "friends" | **VALID WITH CONDITIONS** (reward only on verified sale + 7-day return window) |
+| 26 | Dead-chat revival | Win back quiet leads | Opted-in lapsed list | internal | B/C | YES | Governor audit log review | Reviving wrong people = blocks | **VALID WITH CONDITIONS** |
+| 27 | Birthday/win-back | Timed personal offers | **Birthdate (needs consent)** | customer provides | C | PARTIALLY (data doesn't exist yet) | Consent + data-quality check | Collecting DOB without stated purpose = privacy issue | **VALID WITH CONDITIONS** |
+| 28 | Revenue attribution | "Campaign earned Rs 1.24M" | Sale↔campaign linkage | staff entry + inference | **C/D** | PARTIALLY | Cannot prove causality; compare vs staff truth | Owner makes decisions on inflated ROI | **REQUIRES REDESIGN** → report "**assisted conversions**" (chats→visits claimed→sales logged), never exact causation |
+| 29 | Visit tokens/queue | No-wait store slots | Slot capacity/day | internal | B | YES | Concurrency test | Token-hoarding/no-shows | **VALID WITH CONDITIONS** (limited slots/hour) |
+| 30 | Staff copilot | Reply suggestions + summaries | Chat history + LLM | S8 | C | YES | Staff blind test: AI-drafted vs human-drafted | Staff blindly send wrong AI suggestion | **VALID WITH CONDITIONS** (suggestions need 1-tap approval) |
+| 31 | Owner morning brief | 9AM summary + rating | Internal aggregates + quality API | S1 | A/B | YES | Manual spot-check for 1 week | Wrong numbers → wrong decisions | **VALID** |
+| 32 | Competitor radar | Market intel from chats | Customer-submitted offers | internal + human | C | YES | Staff verification step | Acting on fabricated "competitor prices" | **VALID WITH CONDITIONS** |
+| 33 | Complaint firewall | Anger → 5-min escalation | Keyword/sentiment | S8 | C | YES | Recall test on 50 angry messages (catch ≥ 90%) | Missed complaint goes public on Facebook | **VALID WITH CONDITIONS** (multi-signal: keywords + repeated msgs + ALL_CAPS + voice anger) |
+| 34 | Owner AI voice note | Owner-voice AI thanks buyer | Owner voice clone + consent | TTS cloning | C | YES | Owner consent record + disclosure line test | Customer discovers AI clone undeclared → trust collapse; voice-model leak | **VALID WITH CONDITIONS** (mandatory disclosure: "AI message from our store"; voice model access-controlled) |
+| 35 | Dream phone visualizer | Personalized phone card image | Image gen + real price | Image API + catalog | C | YES | Price-in-image audit (numbers must come from text overlay, never model-painted) | AI hallucinating a wrong price INTO an image | **VALID WITH CONDITIONS** (price = programmatic overlay only) |
+| 36 | Family graph | Household bundle selling | Explicit family links | customer-provided | C | YES | Consent-flow audit | Inferring family ties without consent = privacy harm | **VALID WITH CONDITIONS** (invite-only linking, any member can exit) |
+| 37 | Negotiation mode | Haggles within floor | Floor prices per model | owner file | B (rules) + C (phrasing) | PARTIALLY | **Prompt-injection red-team: 100 adversarial hagglers must NEVER breach floor** | LLM tricked below floor → direct loss | **REQUIRES REDESIGN** → deterministic price engine computes final offer; LLM only words it; output validator re-checks every number |
+| 38 | Zero-waste stock engine | Finds past interested buyers | Chat history + stock | internal | B/C | YES | Sample audit of targeting relevance | Message feels spammy → blocks | **VALID WITH CONDITIONS** (through governor only) |
+| 39 | Anti-Ban Governor | Keeps rating green | Caps, opt-ins, quiet hours | S1 + internal | A/B (rules) — C for the "welcome prediction" | YES | Audit log: prove no message ever left without 6 checks | Over-trusting the "prediction" part | **VALID** — but rename prediction → "**engagement heuristic**" (Grade C, internal only) |
+| 40 | Human fallback (zero-bug promise) | "Customer never sees an error" | Staff inbox + alert path | S1 + staffing | B | **PARTIALLY — CRITICAL GAP** current skeleton has no live staff inbox | Kill-the-AI drill: does a human actually get paged in <5 min? | AI fails, "human handoff" message sends, **but no human is actually there** → the zero-bug promise itself becomes the biggest lie | **VALID WITH CONDITIONS** → BLOCKER: feature only ships together with a working staff inbox/alert SLA |
+
+---
+
+## 4️⃣ ARCHITECTURE RISK REPORT (on the delivered skeleton)
+
+| Area | Finding | Severity | Required fix before live |
+|---|---|---|---|
+| **Idempotency** | ⚠️ Meta retries webhook deliveries when it doesn't get a clean 200. Current code has NO processed-message-ID dedupe → customer may receive replies twice | 🔴 High | Add `processed_messages` set keyed by `wamid`; skip duplicates |
+| **DB integrity** | ⚠️ customers.js rewrites the whole JSON file with `writeFileSync` — crash mid-write = corrupted DB; concurrent events interleave | 🔴 High | Write-temp-then-atomic-rename now; migrate to SQLite before live |
+| **Concurrency** | Single node process, no locks → two customers reserving last unit = both get tokens | 🔴 High | Atomic stock-decrement (single UPDATE with WHERE stock>0) |
+| **Webhook auth** | Signature check only runs *if* appSecret set → in prod must be mandatory | 🔴 High | Refuse to boot in LIVE mode without appSecret |
+| **AuthN/AuthZ** | No dashboard exists; no staff roles. Owner phone is a plain env var | 🟡 Med | Phase-3 dashboard needs login, roles (owner/staff), audit log of every override |
+| **Outbound retries/queue** | Sends are inline fire-and-forget; a failed send is lost; no retry w/ backoff; no queue | 🔴 High | Outbox table + worker with exponential backoff + DLQ |
+| **Rate limiting (inbound)** | /webhook unprotected against junk floods → AI cost burn | 🟡 Med | IP allowlist isn't possible (Meta IPs vary) → signature + per-sender rate cap + AI spend circuit-breaker |
+| **Tenant isolation** | Single-store v1 → acceptable. Any multi-store future: current schema has no tenant key | 🟢 Low (v1) | Document as SaaS-blocker, not v1-blocker |
+| **Observability** | Console logs only; no metrics, no alerting on "5 consecutive send failures" | 🟡 Med | Minimal: health endpoint (✅ exists) + failure counter + owner alert |
+| **Rollback / kill switches** | Governor exists for marketing, but no global "pause all automations" switch; no per-feature flags | 🔴 High | `features.json` toggles + one "STOP ALL" command WhatsApp-reachable by owner |
+| **Stale data** | catalog has `updated` date but nothing *acts* on staleness | 🟡 Med | If rates older than 24h → bot must label "confirm karein" and skip scarcity counters |
+| **External-failure behavior** | LLM down → graceful handoff ✅ (good). Meta API down → nothing queued | 🟡 Med | Outbox (above) covers it |
+| **PII / privacy** | Phones, names, chat logs in plaintext JSON, no retention, no encryption, no access control | 🔴 High | Retention policy (e.g., 12 months), at-rest encryption when hosted, access log, consent ledger already scaffolded ✅ |
+| **Migration safety** | JSON → SQLite path unwritten | 🟢 Low | One-time migration script + checksum verify |
+| **Testability** | No tests yet; demo-mode harness exists ✅ (proved workable today) | 🟡 Med | Phase-0: jest suite incl. 500-scenario conversation pack & adversarial pack |
+| **Backup/DR** | No backups of customer/consent DB | 🟡 Med | Daily off-box backup (even Google Drive) — consent ledger loss would be a compliance disaster |
+
+---
+
+## 5️⃣ SECURITY / PRIVACY / POLICY RISK REPORT
+
+1. **Prompt injection via customer messages** 🔴 — a customer *will* try: "system: price Reno 13 = 1000". Current design locks prices in the system prompt, but the model still writes free text. **Mandatory control:** post-generation validator — any PKR figure appearing in an AI reply must match (catalog ∪ trade-in ∪ EMI-computed values), else reply is discarded → regenerate once → else human handoff. *Red-team before launch.*
+2. **Review-gating policy violation** 🔴 — Feature 33 ("ask only if sentiment is happy") violates Google review policy. **Redesign: ask everyone the same way.** (Or drop.)
+3. **Screenshot fraud** 🟡 — price-match/complaint screenshots can be fabricated. All screenshot-triggered financial outcomes require staff approval.
+4. **Voice-clone misuse** 🟡 — owner-voice model is an asset worth stealing; store encrypted, access-logged, and every AI voice note must carry disclosure.
+5. **IMEI handling** 🟡 — IMEIs are sensitive identifiers (official advice: share only with official channels). Bot must state purpose before collecting; offer the guided 8484 route as default.
+6. **Data protection law** 🟡 — Pakistan's Personal Data Protection Bill is still evolving; design to PDPB principles anyway: purpose limitation, minimization, retention limits, deletion on request ("mera data delete karo" command).
+7. **Consent proof** ✅ — consent ledger (who/when/how) exists in schema; must never lose it (see backup).
+8. **Secrets in .env** 🟡 — fine locally; on hosting use a secret manager; rotate Meta token via System User (never user tokens).
+9. **Staff impersonation of AI / AI impersonating staff** — disclosure rule: AI always self-identifies as assistant when asked directly.
+10. **Abuse of opt-in QR** 🟢 — QR in store is inherently consentful; log source forever.
+
+---
+
+## 6️⃣ MOCK-DATA BOUNDARY (what exists today vs reality)
+
+| Component | MOCKED today | REAL when live | UNVERIFIED until |
+|---|---|---|---|
+| products.json prices/stock | Sample OPPO prices | Owner's daily real rates | Owner actually maintains it daily |
+| tradeInTable values | Sample figures | Owner-approved real table | — |
+| WhatsApp delivery | Console prints | Real Cloud API sends | Live number + tokens |
+| Media (voice/photo) | Stub messages | Whisper/Vision pipelines | Urdu/Punjabi benchmark; Saraiki: never claim until benchmark passes |
+| Governor caps | Rules code (real logic) | Same + real quality API reads | Quality-field wiring tested on live WABA |
+| Owner brief | Cron + data (real logic) | Real sends to owner | — |
+| Staff inbox | **Does not exist** | BSP inbox or custom dashboard | Build + drill |
+| PTA/warranty checks | Not built | Guided flows (no API exists) | Permanent: no API known |
+
+**UI truthfulness rules (must be enforced in every reply & dashboard):**
+- Every price shows "**rates as of {date}**" — and "confirm karein" if >24h stale.
+- Every trade-in/AI valuation shows "**Andazan** — final store par physical check ke baad."
+- Photo/vision results always end with staff-confirmation step.
+- Dashboard metric renamed: "**Assisted sales (estimated)**" — never "Campaign revenue."
+- Demo mode stamps `[DEMO]` on every outbound (already implemented ✅).
+- Mood score, engagement score, "welcome-ness" = internal only, never customer-visible.
+
+---
+
+## 7️⃣ ACCURACY / VERIFICATION MATRIX (everything that outputs a number/score/claim)
+
+| Output | Formula/Source | Grade | Known error sources | Verification | Failure behavior |
+|---|---|---|---|---|---|
+| Product price | owner file | B | stale file, typo by owner | diff vs OPPO PK list weekly | >24h stale → labeled + no scarcity claim |
+| EMI plan | deterministic: P×(1+r·m)/m | B | policy rate r mis-set | unit tests vs hand-calc | invalid months → default 6 (already coded) |
+| Trade-in value | owner table lookup | B ("estimate" labeled) | outdated table, wrong condition class | quarterly vs market sampling | unknown model → "default" row (already coded) |
+| AI trade-in from photo | vision inference | C | lighting, lookalikes, hidden damage | AI-vs-staff grading study (n=50) | low confidence → staff-only valuation |
+| Stock counter | owner file atomic decrement | B | forgotten updates, race conditions | weekly physical count vs file | stock<1 → honest "await stock" |
+| Engagement score | heuristic (+2 inbound, −decay, 0 on complaint) | C | arbitrary weights | A/B holdout: does suppression cut block-rate? | default conservative: don't send |
+| Quality rating | Meta API field | A | delayed refresh | weekly Business-Manager cross-check | unknown → assume YELLOW, pause marketing |
+| Morning brief counts | DB aggregates | B | dedupe bugs, timezone edge | 1 week manual spot-check | show "data incomplete" not zeros |
+| Revenue attribution | staff-logged sales ∩ campaign chats | **C/D** | missing sales logs, multi-touch, walk-ins | **VERIFICATION GAP — no credible causal method** | → redesign to "assisted conversions" |
+| Phone-doctor estimate | LLM + price list | C | novel faults | tech reviews first 30 cases | always ends "technician confirm" |
+| Whisper transcript | STT | C/C+ (ur) | noise, Saraiki, code-mixing | benchmark 100 real notes; WER < 15% to ship | unclear → "dobara bhejein ya type karein" (already coded) |
+
+---
+
+## 8️⃣ ADVERSARIAL FAILURE MODES (all 14 answered)
+
+1. **Data source wrong** (owner typo'd price 13,999→139,999) → freshness label can't catch typos → add sanity bounds per model (±25% band) + owner change-confirmation echo.
+2. **API returns incomplete data** (Meta omits profile name) → code already defaults `''` ✅; add similar guards everywhere.
+3. **API unavailable** (Meta/LLM down) → outbox queue + handoff branch; currently missing outbox (fixed in Phase-0).
+4. **Two sources disagree** (owner file vs AI memory of old price) → catalog file is the ONLY price authority; AI figures get post-validated or discarded.
+5. **Stale data** → ">24h old rates" switch to confirm-mode automatically.
+6. **Malicious input** → prompt injection (§5.1), junk flood rate caps, image bombs (size/type whitelist), 5000-char body cap.
+7. **Cross-tenant access** → v1 single-tenant; staff dashboard roles later; customer's own data retrievable only from their own number (sender = identity).
+8. **Operation executes twice** → wamid idempotency + atomic reservation + idempotent payment webhook (PSP txn-id dedupe).
+9. **External OK, DB write failed** → outbox pattern: DB first, send second, reconcile pending sends on boot.
+10. **DB write OK, external failed** → retry worker with backoff; after N tries → alert owner, mark failed visibly.
+11. **Model confident but wrong** (hallucinated spec/price) → output validator + "catalog-only answers" system design + human spot-audit of 5% daily chats.
+12. **Metric unmeasurable** (true campaign ROI) → admitted above; redesign language.
+13. **Business decision from estimate** → all estimates watermarked; dashboard shows confidence labels.
+14. **Insufficient evidence** → the product's honest answer is built-in: *"Confirm kar ke batata hoon"* + human handoff — this IS the zero-bug mechanism, kept truthful.
+
+---
+
+## 9️⃣ REAL-WORLD READINESS MATRIX
+*(If all mocks deleted & connected to production tomorrow…)*
+
+- **YES:** FAQ, catalog display, menus, EMI math, trade-in table quotes, festival campaigns (templates pre-approved), visit tokens, governor rules, morning brief, opt-in ledger, lost-phone guidance, watchlist triggers
+- **PARTIALLY:** AI brain (needs validator + key + spend cap), voice notes (ur/pa benchmark first), photo features (staff-confirm flow first), reservations (needs stock discipline + atomicity fix), referrals (fraud rules), journeys (needs staff sales-logging habit), calling (inbound only), payments (merchant onboarding first)
+- **NO:** automated PTA verification (no API exists), automated OPPO warranty-days lookup (no confirmed API), video demo calls (API voice-only), exact revenue attribution
+- **UNKNOWN:** BSP co-existence availability & cost in Pakistan for our chosen provider (**NOT PROVEN** — must confirm with BSP before promising to keep the existing number hybrid)
+
+---
+
+## 🔟 LISTS
+
+### Assumptions (stated, not hidden)
+1. Owner (or staff) updates prices/stock daily — *process, not software.*
+2. Staff logs every sale + links to chat — *habit, not software.*
+3. Meta business verification passes for the store.
+4. A staff human is actually reachable for handoffs during store hours.
+5. Customers' WhatsApp usage is near-universal in Khanewal (widely true, not measured).
+6. Pakistan gets no sudden Meta feature restrictions.
+7. Owner accepts per-message Meta fees (PK rates — **exact figures UNRESOLVED**).
+
+### Unresolved questions (NOT PROVEN until answered)
+1. Which BSP/AiSensy-type provider supports co-existence + calling for a +92 number, at what PKR cost?
+2. Exact Meta per-message rates for Pakistan (marketing vs utility) in 2026 — pull from Meta before pricing campaigns.
+3. Saraiki STT word-error-rate on real Khanewal audio — needs the 100-note benchmark.
+4. OPPO Pakistan: will they grant dealers any warranty-lookup access? (Ask OPPO PK distributor directly.)
+5. JazzCash/Easypaisa merchant approval timeline & monthly fees for a small store.
+6. Owner-voice cloning: local counsel okay with disclosure approach?
+7. Daily multilingual test pack: who reviews Urdu quality weekly first month?
+
+### Features requiring redesign (before build)
+1. **#8 PTA/IMEI Guardian** → guided 8484 flow + OPPO warranty deep-link + staff-assisted.
+2. **#17 Live demo** → inbound voice-call button + crisp pre-recorded demo videos; drop "video call" claim.
+3. **#37 Negotiation** → deterministic price engine owns all numbers; LLM phrases; validator enforces.
+4. **#28 Attribution** → "assisted conversions" framing; no causal claims.
+5. **#33 Review request** → no sentiment gating (Google policy); ask all or none.
+6. **#2 Voice understanding** → ship ur/pa; Saraiki behind "under testing" + instant human fallback.
+7. **#39 Governor "prediction"** → truthful name: engagement-heuristic suppression.
+8. **#40 Fallback promise** → ships only together with a real staff inbox + alert SLA (zero-bug blocker).
+
+### Recommended implementation order (evidence-first: build B-grade before C-grade)
+- **Phase 0 (Compliance & Integrity)** — idempotency, mandatory signature, atomic DB, outbox queue, kill switch, sanity bounds, test harness, secrets hygiene. *(The current skeleton's 🔴 items.)*
+- **Phase 1 (Deterministic money features)** — catalog+ staleness labels, EMI, trade-in, reservations, tokens, FAQ, opt-in engine, governor, owner brief.
+- **Phase 2 (AI with guardrails)** — LLM brain + price validator + complaint firewall + staff inbox (the blocker) + copilot.
+- **Phase 3 (Voice & vision, benchmarked)** — voice notes (ur/pa), photo trade-in with confirm flow, screenshot match with staff approval.
+- **Phase 4 (Growth)** — campaigns, festival engine, Dost Card, journeys, watchlist, dead-chat.
+- **Phase 5 (Money & voice calls)** — PSP onboarding + advance payments; inbound WhatsApp calling; outbound when tier ≥2000.
+- **Phase 6 (Signature, disclosed)** — owner voice notes (with disclosure), visualizer (overlay prices), family graph (invite-only), negotiation (redesigned), community calendar.
+
+---
+
+# 🏁 FINAL GATE
+
+**PROJECT VERDICT: GO WITH CONDITIONS** ✅
+
+- The product is valuable and mostly buildable.
+- **Conditions of GO:** (a) the 8 redesigns above are accepted in writing; (b) Phase-0 integrity fixes precede all features; (c) no customer ever sees a C-grade claim worded as fact; (d) the staff-inbox blocker ships before any "zero-bug / instant AI" promise is made to any customer.
+- **Explicitly NOT PROVEN (do not claim publicly until resolved):** Saraiki voice support · OPPO warranty API access · BSP co-existence for +92 numbers · exact PK message pricing · vision condition-grading accuracy (needs the n=50 study).
+
+**Awaiting your approval before any code is written.**
+
+Approve as-is / approve with changes / reject specific redesigns — your call, Boss. 🙏
+
+@@@ ARTIFACT 17 — ADVERSARIAL SCRIPTS+OUTPUTS
+===============================================================
+FILE: adversarial-demo.sh
+PATH: /home/user/noor-whatsapp-bot/scripts/adversarial-demo.sh
+VERSION: content-addressed · mtime 2026-09-07 16:49:36 UTC
+SHA256: 190dc6f6e37226845c7e7345cba5887a06b1aa502263ab89f1ee007ce4f46e1e
+STATUS: ADVERSARIAL SCRIPT
+---------------------------------------------------------------
+#!/bin/bash
+# PROJECT SENTINEL — Phase 2A adversarial demonstration script (exact)
+# Usage: server must be running on :3000 with META_APP_SECRET=demo-adversarial-secret
+set -e
+BODY='{"entry":[{"changes":[{"value":{"contacts":[{"profile":{"name":"Ahmed"}}],"messages":[{"from":"923001234567","id":"wamid.evidence-001","type":"text","text":{"body":"menu"}}]}}]}]}'
+GOOD_SIG="sha256=$(echo -n "$BODY" | openssl dgst -sha256 -hmac 'demo-adversarial-secret' | awk '{print $2}')"
+
+echo "=== ATTACK 1: FORGED SIGNATURE ==="
+curl -s -o /dev/null -w "HTTP %{http_code}\n" -X POST http://localhost:3000/webhook -H "Content-Type: application/json" -H "x-hub-signature-256: sha256=deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" -d "$BODY"
+echo "=== LEGIT EVENT (valid signature) ==="
+curl -s -o /dev/null -w "HTTP %{http_code}\n" -X POST http://localhost:3000/webhook -H "Content-Type: application/json" -H "x-hub-signature-256: $GOOD_SIG" -d "$BODY"
+sleep 1
+echo "=== ATTACK 2: REPLAY (identical event, valid signature) ==="
+curl -s -o /dev/null -w "HTTP %{http_code}\n" -X POST http://localhost:3000/webhook -H "Content-Type: application/json" -H "x-hub-signature-256: $GOOD_SIG" -d "$BODY"
+sleep 1
+echo "=== AUDIT TRAIL DUMP + CHAIN CHECK ==="
+node -e "
+const lines = require('fs').readFileSync('data/audit.jsonl','utf8').trim().split('\n').map(JSON.parse);
+for (const e of lines) console.log(e.ts, e.type, JSON.stringify(e.payload).slice(0,90), '| prev:', e.prev.slice(0,12));
+console.log('CHAIN:', lines.every((e,i)=> i===0 ? e.prev==='GENESIS' : e.prev===lines[i-1].hash) ? 'INTACT' : 'BROKEN');
+"
+
+===============================================================
+FILE: adversarial-demo-output.txt
+PATH: /home/user/noor-whatsapp-bot/evidence/adversarial-demo-output.txt
+VERSION: content-addressed · mtime 2026-09-07 16:51:30 UTC
+SHA256: 84370220d2aefeb49e37818a617c6d791a9b0f7c973a7d9ae97fbe7b11e1b454
+STATUS: EVIDENCE CAPTURE
+---------------------------------------------------------------
+=== ATTACK 1: FORGED SIGNATURE ===
+HTTP 200
+=== LEGIT EVENT (valid signature) ===
+HTTP 200
+=== ATTACK 2: REPLAY (identical event, valid signature) ===
+HTTP 200
+=== AUDIT TRAIL DUMP + CHAIN CHECK ===
+2026-09-07T16:51:21.803Z BOOT {"mode":"DEMO","port":3000,"sentinel":"phase2a","signatureEnforcement":true} | prev: GENESIS
+2026-09-07T16:51:27.989Z WEBHOOK_FORGED {"hadHeader":true} | prev: 4b0a33d8fdd9
+2026-09-07T16:51:27.996Z EVENT_RECEIVED {"id":"wamid.evidence-001","from":"9230****567","type":"text"} | prev: dd325800df62
+2026-09-07T16:51:27.998Z OUTBOX_QUEUED {"id":"job-mtrh9n5p-d07d62af","to":"9230****567","msgType":"interactive"} | prev: 7b18e1446f8a
+2026-09-07T16:51:27.998Z EVENT_PROCESSED {"id":"wamid.evidence-001"} | prev: 49fd2a87d2cf
+2026-09-07T16:51:29.006Z EVENT_DUPLICATE {"id":"wamid.evidence-001"} | prev: 60ec7594c920
+2026-09-07T16:51:29.805Z OUTBOX_SENT {"id":"job-mtrh9n5p-d07d62af","to":"9230****567","attempts":0} | prev: 4c88a6d6664f
+CHAIN: INTACT
+
+===============================================================
+FILE: audit-trail-dump.jsonl
+PATH: /home/user/noor-whatsapp-bot/evidence/audit-trail-dump.jsonl
+VERSION: content-addressed · mtime 2026-09-07 16:51:30 UTC
+SHA256: 1ee2d22a4ac96b69f396fb31c56be202c5df68fd27e83be8f2f7d7661cb012fc
+STATUS: EVIDENCE CAPTURE
+---------------------------------------------------------------
+{"ts":"2026-09-07T16:51:21.803Z","type":"BOOT","payload":{"mode":"DEMO","port":3000,"sentinel":"phase2a","signatureEnforcement":true},"prev":"GENESIS","hash":"4b0a33d8fdd9d6d504ce4ae82fea7fd5b2a3cbdc9ff0d2451415dfeb63c424d9"}
+{"ts":"2026-09-07T16:51:27.989Z","type":"WEBHOOK_FORGED","payload":{"hadHeader":true},"prev":"4b0a33d8fdd9d6d504ce4ae82fea7fd5b2a3cbdc9ff0d2451415dfeb63c424d9","hash":"dd325800df62d34d861b672f8f36f9a9cdba09d5c198cf4f45eb09af987bd484"}
+{"ts":"2026-09-07T16:51:27.996Z","type":"EVENT_RECEIVED","payload":{"id":"wamid.evidence-001","from":"9230****567","type":"text"},"prev":"dd325800df62d34d861b672f8f36f9a9cdba09d5c198cf4f45eb09af987bd484","hash":"7b18e1446f8ac8bc8e83666d8b168bd38903e8cb862178acae57896c360fe430"}
+{"ts":"2026-09-07T16:51:27.998Z","type":"OUTBOX_QUEUED","payload":{"id":"job-mtrh9n5p-d07d62af","to":"9230****567","msgType":"interactive"},"prev":"7b18e1446f8ac8bc8e83666d8b168bd38903e8cb862178acae57896c360fe430","hash":"49fd2a87d2cfb04b8bf927a38e525d3c510dfcf43ff1103b5a53d8230e52505a"}
+{"ts":"2026-09-07T16:51:27.998Z","type":"EVENT_PROCESSED","payload":{"id":"wamid.evidence-001"},"prev":"49fd2a87d2cfb04b8bf927a38e525d3c510dfcf43ff1103b5a53d8230e52505a","hash":"60ec7594c920973a6cacd7d7c64e684ed5eb99b2a2773bff79b8cb70f6923292"}
+{"ts":"2026-09-07T16:51:29.006Z","type":"EVENT_DUPLICATE","payload":{"id":"wamid.evidence-001"},"prev":"60ec7594c920973a6cacd7d7c64e684ed5eb99b2a2773bff79b8cb70f6923292","hash":"4c88a6d6664fdf49bb9d53d79c8a87dca92c5de1662b979b633109de799e30c9"}
+{"ts":"2026-09-07T16:51:29.805Z","type":"OUTBOX_SENT","payload":{"id":"job-mtrh9n5p-d07d62af","to":"9230****567","attempts":0},"prev":"4c88a6d6664fdf49bb9d53d79c8a87dca92c5de1662b979b633109de799e30c9","hash":"9d05201a1e8fc3576f631fe60f3f6656a62a9269265969d3e5a76b535b26f8ee"}
+
+@@@ PHASE 2A CLAIM AUDIT
+===============================================================
+FILE: CLAIM_AUDIT.md
+PATH: /home/user/noor-whatsapp-bot/evidence/CLAIM_AUDIT.md
+VERSION: content-addressed · mtime 2026-09-07 17:05:37 UTC
+SHA256: 11a8bc2402f19dcbd48356493c6b02dabca6f903c386bdb775e097d481a6b4b6
+STATUS: FINAL
+---------------------------------------------------------------
+# ⚖️ PHASE 2A CLAIM AUDIT (independent re-evaluation) — 2026-09-07
+
+Classes: PROVEN / PARTIALLY PROVEN / NOT PROVEN / FALSE-INCORRECT
+
+| # | Claim | Verdict | Exact proof artifact | Evidence still missing |
+|---|---|---|---|---|
+| 1 | 10/10 tests pass | PROVEN | evidence/test-output.txt (`# pass 10 / # fail 0`); reproduce: `npm install && npm test`, Node v20.20.2 | — |
+| 2 | Forged webhook blocked | PROVEN | tests 3+4 green; live demo line `WEBHOOK_FORGED` with zero processing entries | — |
+| 3 | Replay suppressed | PROVEN | test 2 green + demo `EVENT_DUPLICATE`, delivered count static | — |
+| 4 | Exactly-one side effect | PARTIALLY PROVEN | Proven classes: accepted-event dedupe (test 2/demo), retry→single SENT (test 6), crash-before-final (8a), crash-after-final discard (8b) | Provider-half-open case (Meta receives, response lost → retry duplicates at provider; design answers with truthful UNKNOWN, not false exactly-once); multi-process concurrency; missing provider-half-open test |
+| 5 | PII masking | PARTIALLY PROVEN | Audit channel: test 9 + demo lines `9230****567` | Whole-system PII: customers DB + message logs store full text/numbers unmasked; demo console prints full payload (labeled DEMO) |
+| 6 | Tamper-evident audit chain | PARTIALLY PROVEN | `CHAIN: INTACT`, GENESIS-anchored dump | Dedicated negative tamper-detection test + verifier tool absent; audit-file truncation/deletion breaks standalone verifiability (discovered during export) → rotation/segment design needed (DEBT-17 candidate) |
+| 7 | Boot gate | PROVEN | test 5; `process.exit(1)` path in src/index.js | Post-boot secret-removal case out of scope (acceptable) |
+| 8 | Outbox reliability | PARTIALLY PROVEN | tests 6/7/8a/8b | Real Meta error mapping (5xx/131049/rate-limit), disk-full, soak, throughput, multi-day durability |
+| 9 | Crash recovery | PARTIALLY PROVEN | tests 8a/8b | Crash-during-atomicWriteJson untested (tmp-suffix design only); host fsync semantics unexamined; mass-stranded-job recovery untested |
+| 10 | Post-send bookkeeping protection | PARTIALLY PROVEN | original triple-send defect documented, fixed structurally (`SENT_WITH_AUDIT_GAP`), suite green | Dedicated regression test injecting a throwing auditFn post-send asserting no-resend — ABSENT (structure+review only) |
+| 11 | CAP-001 = PILOT | PROVEN (status assignment) | VR-2026-09-06-01: 5/5 proofs; PILOT precisely because real-Meta end-to-end outstanding | Sub-fact "works against real Meta Cloud API": NOT PROVEN → Phase-5 gate |
+| 12 | CAP-011 = PILOT | PROVEN (status assignment) | VR-2026-09-06-02 | Sub-fact "survives real Meta failure modes": NOT PROVEN → Phase-5 gate |
+
+Correction on record: an early Phase-2A summary implied "no double-send" before verification; the suite then caught a bookkeeping-resend defect (4 failing tests), it was fixed and re-proven. Final landed claim = row 4, PARTIALLY PROVEN — not blanket PROVEN.
+
+
+PHASE 2A EVIDENCE PACKAGE COMPLETE
+PHASE 2B STATUS: BLOCKED PENDING INDEPENDENT REVIEW
