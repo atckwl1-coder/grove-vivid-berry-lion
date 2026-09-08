@@ -181,12 +181,14 @@ test('KS4/KS5. WhatsApp customer "STOP ALL" / "RESUME ALL" → switch never move
 // ── KS6 + KS15: STOP holds queued autonomous job + CRITICAL RACE ──
 test('KS6/KS15. race: autonomous job ready + STOP ≈ same time → after commit, job HELD, provider untouched', async () => {
   // Arm an autonomous AI-sourced job directly in the outbox (bypassing enqueue gate on purpose
-  // to simulate "already queued when STOP lands")
+  // to simulate "already queued when STOP lands"). Deterministic race construction:
+  // enqueue() and stopAll() are BOTH synchronous → the event loop guarantees no outbox poll
+  // can run between them. (HTTP not used here on purpose: HTTP auth is covered by K1/KS1/KS3/
+  // KS11; THIS test isolates the dispatch-race property, AF-10 FIX — no network-jitter variable.)
   const phone = '923005550002';
   outbox.enqueue({ messaging_product: 'whatsapp', to: phone, type: 'text', text: { body: 'autonomous marketing-ish message' } }, { source: 'AI' });
-  // owner stop lands (≈ same time as a dispatch cycle)
-  const stop = await kpost('/inbox/kill/stop', boss, { actionId: actId('racedstop'), reason: 'race drill' });
-  assert.equal(stop.body.state, 'AUTOMATION_STOPPED');
+  const stop = kill.stopAll({ staffId: 'boss', role: 'OWNER' }, actId('racedstop'), 'race drill'); // sync — lands before any possible tick
+  assert.equal(stop.state, 'AUTOMATION_STOPPED');
   await sleep(250); // many poll cycles pass
   const toPhone = delivered.filter((d) => d.to === phone);
   assert.equal(toPhone.length, 0, 'PROVIDER NEVER TOUCHED for the autonomous job after stop');
