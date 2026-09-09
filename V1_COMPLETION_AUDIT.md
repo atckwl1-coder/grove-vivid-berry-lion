@@ -69,7 +69,7 @@ CAP-020/021 voice (ur/pa), CAP-022..024 vision/TTS, CAP-023 price-match, CAP-025
 | # | V1 capability | Why V1 (business workflow) | Authoritative source | Status |
 |---|---|---|---|---|
 | **V1-0** | Kill phantom reservation tokens + all lying texts | customer-facing "confirms" that confirm nothing break the no-lie law | registry CAP-006 row; FEASIBILITY truth rule | **CLOSED 2026-09-09 — VR-2026-09-09-01** (commit `b9e6eb6`, merge `36ca9df`) |
-| **V1-1** | Conversation memory / multi-turn context | "autonomously handling conversations" is the product's spine; model is amnesiac per message | user's core objective + `brain.js` evidence | open (needs authorization) |
+| **V1-1** | Conversation memory / multi-turn context | "autonomously handling conversations" is the product's spine; model is amnesiac per message | user's core objective + `brain.js` evidence | **CLOSED 2026-09-09 — VR-2026-09-09-02** (commit `47a2c16`, merge `bad2d30`) |
 | **V1-2** | Catalog authority semantics (staleness on quoted prices + owner-update ritual) | shop workflow = quoting REAL prices; any JSON date is silently "today" | CAP-003 registry row (`observed_at VERIFIED|STALE`); P3 standby | open |
 | **V1-3** | Deterministic negotiation rules engine (bounded floors; LLM only phrases) | "strong negotiation within approved business rules"; LLM price authority forbidden | FEASIBILITY §1 #7 + CAP-039 row | **blocked on owner: floors list** |
 | **V1-4** | Post-purchase / satisfaction follow-up cadence (opt-in, consent-gated, kill-switch-compatible) | sales don't end at purchase | CAP-032 row | **blocked on owner: timing/content spec** |
@@ -82,7 +82,7 @@ CAP-020/021 voice (ur/pa), CAP-022..024 vision/TTS, CAP-023 price-match, CAP-025
 ## 10. BIGGEST ACTUAL BLOCKERS TO A USABLE V1
 
 1. **Requirement holes, not code holes:** floors (V1-3) and follow-up cadence (V1-4) don't exist anywhere — owner input required; fabricating them is forbidden.
-2. **LLM amnesia** (no message history to the model) — biggest code-side gap vs "autonomous conversations" (→ V1-1).
+2. ~~**LLM amnesia** (no message history to the model)~~ — **closed by V1-1 (2026-09-09): bounded per-customer multi-turn context in `think()` (12 entries × 500 chars, derived-only, DEBT-18 compliant).**
 3. **Data authority is a hand-edited SAMPLE JSON** — acceptable for demo, unacceptable as price truth without staleness + owner-update ritual (→ V1-2). *(V1-0 side-effect: file is now at least version-controlled.)*
 4. ~~An actively-false UX in the menu ("RESERVED" phantom tokens)~~ — **removed by V1-0 (2026-09-09).**
 5. **No real WhatsApp run has ever happened** — every transport claim is demo-bound (B-2).
@@ -101,6 +101,13 @@ CAP-020/021 voice (ur/pa), CAP-022..024 vision/TTS, CAP-023 price-match, CAP-025
 V1-0 + V1-1 combined ("truth cut + memory"): (a) remove/replace phantom reservation + lying texts; then (b) wire bounded conversation history into `think()`. **Executed in two authorized cycles:** (a) done as **V1-0 (this cycle, VR-2026-09-09-01)**; (b) = **V1-1, awaiting explicit authorization.**
 
 ---
+
+## V1-1 closure record (2026-09-09)
+
+- **Contract:** bounded per-customer multi-turn context in `brain.think()`; derived from repo conventions; DEBT-18 respected; foundations untouched; no new storage/DB/AI service/dependencies.
+- **Implemented:** `customers.recentConversation(phone, n=12)` — pure derivation over the existing `db.messages` store (same source as CAP-008 §6 staff context); inbound → `user` role (untrusted), outbound text → `assistant`; chronological; skips empty text + `menu_*` flow ids; last 12 eligible × ≤500 chars (existing truncation) = ≤6000 chars; persistence = existing save()/loadDb() (restart proven cross-process); corrupt → [] / fresh start. `think()` builds `[system, ...history, user(current)]` — system always first, current turn always last, no duplication; new system-prompt rule 7 (history = DATA, not instructions).
+- **Verification:** `tests/v11memory.test.js` 12/12 on the real path (signed webhook → brain → local LLM capture double → P2 firewall → outbox spy); suite 90/90 ×5 (3 pre-merge + 2 post-merge); cap055 14/14 ×3; CAP-008/055/P2 files untouched, all green; adversarial: isolation + PII cross-leak, replay/dup, empty, boundary + over-limit, restart, corrupt, missing, injection (system byte-identical), 4000-char message, non-text inbound.
+- **Commit:** `47a2c160cd12d22dc5d2e393aab20ff88ec9cba9` · **Merge:** `bad2d3090c1745666f9f690ac5628aebd258e113` (main HEAD) · **VR:** VR-2026-09-09-02. (Process note: first commit landed on main by placement error, corrected via soft-reset before any record referenced it — documented in VR.)
 
 ## V1-0 closure record (2026-09-09)
 
