@@ -1,8 +1,9 @@
 # HANDOFF — if another operator picks this up
 
-1. Read in order: `README.md` (orient) → `FEASIBILITY_AUDIT.md` (strategy truth) → `CAPABILITY_REGISTRY.yml` (capability states + change_log) → `VERIFICATION_LOG.md` (every VR) → `GPT_AUDIT.md` (audit ledger + infrastructure absence proof) → `BLOCKERS.md` (open gates).
+1. Read in order: `README.md` (orient) → `FEASIBILITY_AUDIT.md` (strategy truth) → `V1_COMPLETION_AUDIT.md` (V1 inventory + priority list + what-NOT-to-build) → `CAPABILITY_REGISTRY.yml` (capability states + change_log) → `VERIFICATION_LOG.md` (every VR) → `GPT_AUDIT.md` (audit ledger + infrastructure absence proof) → `BLOCKERS.md` (open gates).
 2. Never claim beyond evidence; B-1 (external audit gate) is OPEN for everything shipped.
 3. Run: `npm install && npm test` (node_modules is NOT durable across sandbox turns — reinstall each session).
 4. Live drill: `source scripts/drill-env.sh && npm start`, then scripts under `scripts/*drill*` (they sign webhooks correctly with awk `$2` — hard-won lesson).
-5. Write access discipline: `.gitignore` keeps `data/` out of git by design (sessions/PII/kill state).
-6. Next likely cycle (needs explicit authorization): P3 authoritative data layer (VERIFIED/STALE evidence feeding the firewall's EVIDENCE stage).
+5. Write access discipline: `.gitignore` keeps runtime `./data` out of git by design (sessions/PII/kill state). `src/data/products.json` (owner-maintained catalog) IS tracked — it was accidentally ignored until V1-0 (2026-09-09); the LLM system prompt embeds its `policies` JSON, so policy strings there are customer-quotable — keep them truthful.
+6. Git identity does NOT persist across sandbox turns — before committing: `git config user.name "$(git log -1 --format='%an')"` + same for email (identity: `sentinel-eng <sentinel@local>`).
+7. Next cycle (needs explicit authorization): **V1-1 conversation memory** — bounded per-customer transcript fed into `brain.think()` (currently amnesiac: one user message per LLM call); must respect DEBT-18 sensitive-zone rules. Full V1 list + dependencies + do-not-build list: `V1_COMPLETION_AUDIT.md`.

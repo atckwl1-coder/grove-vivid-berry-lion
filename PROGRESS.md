@@ -7,7 +7,8 @@
 | 2026-09-08 | CAP-008 human fallback core | PILOT (suite-era 37/37 + live drill); §18 STOP lifted | VR-2026-09-08-01 |
 | 2026-09-08 | CAP-055 owner kill switch | PILOT (51/51, race, restart, corruption fall-closed) | VR-2026-09-08-02 |
 | 2026-09-08 | P2 central action firewall | PILOT (67/67, bypass-scan, injection, kill-compose, live drill) — **audit-gate BLOCKED** | VR-2026-09-08-03 |
-| 2026-09-08 | P2 audit-integrity remediation (THIS cycle) | DONE — no product change; audit-gate gap formalized, regressions proven | VR-2026-09-08-04 |
+| 2026-09-08 | P2 audit-integrity remediation | DONE — no product change; audit-gate gap formalized, regressions proven | VR-2026-09-08-04 |
+| 2026-09-09 | V1 completion audit (analysis-only) + **V1-0 truth cut** | SHIPPED — phantom reservation/booking/token removed from all customer-facing paths; 78/78 (11 new); CAP-006 → NOT_PROVEN (honest deferral) | VR-2026-09-09-01 |
 
-Pending (in order of user's roadmap): P3 authoritative data; P4 guarded AI (CAP-009); P5 V1 capability subset; then per-capability production gates; Phase 5 real pilot.
-OFF until gated: CAP-006 reservations, CAP-007 marketing.
+Pending (in order of the V1 list, see `V1_COMPLETION_AUDIT.md`): **V1-1 conversation memory** (next, needs explicit authorization); V1-2 catalog authority/staleness; V1-3 negotiation rules engine (needs owner floors); V1-4 post-purchase follow-up cadence (needs owner spec); V1-5 real-pilot readiness. Older roadmap still valid: P3 data → P4/CAP-009 → per-capability production gates → Phase 5 real pilot.
+OFF until gated: CAP-006 reservations (capability absent — honest deferral live since V1-0), CAP-007 marketing.

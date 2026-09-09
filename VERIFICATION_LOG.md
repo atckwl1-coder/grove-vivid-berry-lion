@@ -135,3 +135,40 @@
 - **Result:** REMEDIATION COMPLETE for documentation; AUDIT GATE stays OPEN until real auditor infrastructure exists. P2 status: **PILOT (audit-gate blocked)** — unchanged, not promoted, not demoted.
 
 **Suite:** `npm test` → 67/67 ✅ (5 of 5 clean runs this cycle) · cap055 targeted 4/4 ✅ · zero product diff ✅
+
+---
+
+## VR-2026-09-09-01 — V1-0 TRUTH CUT (phantom reservation/booking/token removed; no-lie invariant restored)
+
+- **Mandate:** remove the phantom reservation / fake booking behavior from every customer-facing path; replace false claims with truthful behavior; build NOTHING new (no reservation capability, no persistence, no slots, no token semantics); CAP-008/CAP-055/P2 unmodified.
+- **Scope basis:** V1 COMPLETION AUDIT (12-section inventory, delivered 2026-09-09; durable copy = `V1_COMPLETION_AUDIT.md`). V1-0 = "kill phantom reservation tokens + any other lying texts".
+- **False behaviors found (keyword sweep: reservation/reserved/booking/booked/token/visit/confirmed/slot + appointment/watch/NK-/24 ghante/hold — src, scripts, tests, root docs; every hit inspected):**
+  1. `flows/router.js` reserve intent — "✅ RESERVED! 🎉 … 24 ghante tak aapke naam par … Token: NK-…" (phantom success + fake token + fake hold). **FIXED.**
+  2. `flows/router.js` reserve OOS branch — "watch … stock aate hi sab se pehle aapko khabar milegi" (phantom subscription; no watchlist exists). **FIXED (folded into honest single path; stock-0 reported truthfully).**
+  3. `flows/router.js` menu_visit — "Token mil jayega — store par wait nahi karna parega!" + wrote false `state:'BOOKING'` (no consumer existed). **FIXED (honest deferral; state line removed).**
+  4. `flows/router.js` menu rows — "Store Visit Book Karein / Token lein, line mein na lagein" and "Phone doctor + slot booking". **FIXED (labels truthful; ids/handlers untouched).**
+  5. `flows/router.js` trade-in button — "Visit book karein". **FIXED → "Timing & pata".**
+  6. `services/emi.js` — "'visit' likh kar appointment lein". **FIXED → "timing aur pata mil jayega".**
+  7. `services/brain.js` demo fallback — suggested "reserve {id}" command (feature absent). **FIXED.**
+  8. `services/brain.js` LLM system prompt — no rule preventing the LLM from promising reservations/tokens/holds. **FIXED (new hard rule 6).**
+  9. `data/products.json` policies.reserve — "Phone 24 ghante ke liye aapke naam par lock ho jata hai, bilkul free" (phantom policy; **quotable by the LLM** — system prompt embeds `JSON.stringify(policies)`). **FIXED.**
+  - Inspected, NO change (reasons recorded): `customers.js` `reservations: []` dead bucket (no reader, no customer-facing effect); `tradein.js` "Final value store par confirm hogi" (true in-store process, not a booking claim); `brain.js` "confirm kar ke batata hoon"→handoff (true); session/verify tokens in auth/webhook (staff-side infra); README env token (infra).
+- **Implementation:** 3 code files + 1 data file + 1 test file + `.gitignore` (see §files). Smallest safe change: only the false claims and their direct enablers; every flow handler's id, control flow, and return contract preserved.
+- **Latent defect found+fixed inside the touched path:** bare `reserve` → `findProduct('')` matched the FIRST product (`name.includes('')` is always true) — old code phantom-"reserved" a3x on a bare word; new code quotes a3x's price as if asked. Empty-query guard added (reserve path only; `findProduct` itself untouched — other callers already guarded).
+- **Repo defect exposed by the cut, minimally fixed:** `src/data/products.json` was git-IGNORED by the unanchored `data/` pattern since the retro git-init (a fresh clone has no catalog → boot failure). `.gitignore` anchored to `/data/` (runtime `./data` still ignored) and the file is first-time tracked. No content of the file changed beyond the phantom policy string.
+- **Mandated verification (EXPECTED / ACTUAL / PROVES / DOES-NOT-PROVE):**
+  1. *Previous phantom response cannot be produced* — EXP: "reserve reno13" yields zero of {RESERVED, Token, NK-\d+, 24 ghante, aapke naam par}; ACT: T1 asserted clean through real signed-webhook→firewall→outbox path; PROVES: phantom unproducible via the reserve flow; DOES-NOT-PROVE: that a real reservation capability exists (it does not) or LLM-path behavior (prompt rule 6, non-deterministic).
+  2. *No fake token generated* — EXP: no /NK-\d+/ anywhere; ACT: T2 (bare intent) + T9 (global scan of every delivery) clean; static scan: zero phantom strings in executable code (only in explanatory comments); PROVES: no token is produced on any tested path; DOES-NOT-PROVE: future code can't reintroduce one (review matter).
+  3. *No nonexistent reservation represented as successful* — EXP: no success claim; no booking state; ACT: T1/T2/T4 — reply is a deferral; customer record stays `state:'IDLE'` (asserted from DB file); PROVES: no fake reservation state written; DOES-NOT-PROVE: LLM won't improvise one (rule 6 mitigates).
+  4. *No slot/availability falsely claimed* — EXP: visit flow admits "slot confirm nahi kar sakte"; stock-0 reported as "0 pieces"; no watch promise; ACT: T3 (stock patched to 0 in-flight, file restored byte-exact) + T4 clean; PROVES: availability truthfully reported, no phantom subscription; DOES-NOT-PROVE: that catalog data is live (V1-2 staleness).
+  5. *Replacement message truthful* — EXP: every factual line maps to a real source (price/stock ← products.json; timing ← policies; staff ← CAP-008 proven); ACT: T5 + T1 asserted per-line; PROVES: message claims only system-backed facts/actions; DOES-NOT-PROVE: data freshness (owner-maintained JSON).
+  6. *Menu remains functional* — EXP: all 6 rows present with working handlers; ACT: T6 — full list delivered, ids intact, labels honest; PROVES: menu behavior preserved; DOES-NOT-PROVE: menu_repair tap destination quality (no handler — pre-existing, AI-generic; recorded).
+  7. *CAP-008 green* — ACT: 19/19 (pre-merge ×3 suites + post-merge ×2; file untouched in diff); PROVES: no regression in human-fallback core; DOES-NOT-PROVE: real-WhatsApp staff pilot (Phase 5).
+  8. *CAP-055 green* — ACT: 14/14, 3 targeted runs + in-suite; file untouched in diff; PROVES: kill-switch regression-free; DOES-NOT-PROVE: Meta-real stop semantics (demo transport).
+  9. *P2 green* — ACT: 16/16; firewall.js untouched; every v1truth delivery passed through the P2 firewall (spy outbox = post-firewall); PROVES: no firewall regression, new sends pass closed-class policy; DOES-NOT-PROVE: external audit gate (B-1 remains OPEN for all).
+  10. *No unrelated behavior changed* — EXP: diff = exactly the truth-cut hunks; ACT: `git diff` reviewed hunk-by-hunk (5 router hunks, 2 brain, 1 emi, 1 data, .gitignore anchor); T10 location flow byte-identical in assertions; suite 78/78; PROVES: no unrelated behavior delta on tested surfaces; DOES-NOT-PROVE: untested surfaces (none changed per diff).
+- **Runs:** focused `tests/v1truth.test.js` 11/11 (after 2 test-expectation fixes: bare-intent guard behavior + pre-existing trade-in match priority pinned, see findings); full suite **78/78 ×3** pre-merge + **×2** post-merge (files=6: cap008 19, cap055 14, p2firewall 16, phase2a 10, remediation 8, v1truth 11); cap055 targeted 14/14 ×3.
+- **Out-of-scope findings recorded (NOT fixed — each needs its own authorization):** (a) trade-in substring-match priority: `a57` matches the `a5` row first → Rs.8,000 instead of a57-row Rs.12,000 (estimate stays honestly labeled); (b) location flow ships a "demo link — asli pin yahan lagega" disclosure string in customer messages (demo artifact in live text); (c) dead `db.reservations: []` bucket; (d) `menu_repair` row has no router handler (falls to AI-generic).
+- **Result:** PASS (sandbox grade). V1-0 CLOSED. CAP-006 row: REDESIGN_REQUIRED → NOT_PROVEN (capability absent; honest deferral proven). Nothing promoted. Audit gate B-1 remains OPEN for everything shipped.
+
+**Suite:** `npm test` → **78/78** ✅ (6 files) · focused v1truth 11/11 ✅ · cap055 14/14 ×3 ✅ · zero phantom strings in executable code ✅
