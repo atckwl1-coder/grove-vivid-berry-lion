@@ -1,0 +1,63 @@
+{
+  "updated": "2026-09-05",
+  "note": "⚠️ SAMPLE prices — owner rozana update karega. AI sirf yahi prices quote karta hai, kabhi khud se nahi banata.",
+  "products": [
+    {
+      "id": "a3x",
+      "name": "OPPO A3x",
+      "variant": "4GB / 64GB",
+      "price": 34999,
+      "stock": 7,
+      "highlights": ["5100mAh battery", "45W SUPERVOOC", "Military-grade shock resistance"],
+      "tags": ["budget", "battery", "students"]
+    },
+    {
+      "id": "a60",
+      "name": "OPPO A60",
+      "variant": "8GB / 128GB",
+      "price": 54999,
+      "stock": 5,
+      "highlights": ["Snapdragon 680", "50MP camera", "5000mAh"],
+      "tags": ["midrange", "camera"]
+    },
+    {
+      "id": "reno12f",
+      "name": "OPPO Reno 12F",
+      "variant": "8GB / 256GB",
+      "price": 84999,
+      "stock": 4,
+      "highlights": ["AI Portrait camera", "120Hz AMOLED", "Slim design"],
+      "tags": ["camera", "gaming", "style"]
+    },
+    {
+      "id": "reno13",
+      "name": "OPPO Reno 13",
+      "variant": "12GB / 256GB",
+      "price": 139999,
+      "stock": 3,
+      "highlights": ["Dimensity 8350", "AI Livephoto", "IP69 waterproof"],
+      "tags": ["flagship", "camera", "pubg", "gaming"]
+    },
+    {
+      "id": "findx8",
+      "name": "OPPO Find X8",
+      "variant": "16GB / 512GB",
+      "price": 249999,
+      "stock": 2,
+      "highlights": ["Hasselblad camera", "Dimensity 9400", "Premium flagship"],
+      "tags": ["flagship", "camera", "premium"]
+    }
+  ],
+  "tradeInTable": [
+    { "match": ["a5", "a15", "a16", "a17"], "good": 8000, "average": 5000, "poor": 2500 },
+    { "match": ["a54", "a55", "a57"], "good": 12000, "average": 8000, "poor": 4000 },
+    { "match": ["reno", "f19", "f21"], "good": 20000, "average": 14000, "poor": 7000 },
+    { "match": ["default"], "good": 6000, "average": 3500, "poor": 1500 }
+  ],
+  "policies": {
+    "warranty": "1 saal official OPPO Pakistan warranty, sirf PTA approved sets",
+    "emi": "3 se 12 mahine ki asaan installments — 3% monthly service charge",
+    "timing": "Subah 10 se raat 10 baje, 7 din khula",
+    "reserve": "Online reservation abhi available nahi — store par aayen ya staff se baat karein"
+  }
+}

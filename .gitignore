@@ -1,5 +1,5 @@
 node_modules/
-data/
+/data/
 *.log
 .env
 .p2-stash

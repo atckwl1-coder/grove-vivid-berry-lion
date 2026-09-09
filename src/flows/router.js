@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────
-//  FLOW ROUTER — menu, buttons, EMI, trade-in, reservation
+//  FLOW ROUTER — menu, buttons, EMI, trade-in, visit-info (V1-0: no fake booking)
 //  AI se pehle kaam karta hai: agar yahan handle ho gaya to AI ki zaroorat nahi
 // ─────────────────────────────────────────────────────────────
 import * as wa from '../services/whatsapp.js';
@@ -26,8 +26,8 @@ export async function routeFlow(from, rawText, msg, customer) {
       {
         title: 'Service',
         rows: [
-          { id: 'menu_repair', title: '🛠️ Repair / Status', description: 'Phone doctor + slot booking' },
-          { id: 'menu_visit', title: '📅 Store Visit Book Karein', description: 'Token lein, line mein na lagein' },
+          { id: 'menu_repair', title: '🛠️ Repair / Status', description: 'Repair info — staff se baat karein' },
+          { id: 'menu_visit', title: '📅 Store Visit', description: 'Timing & location — staff se rabta' },
           { id: 'menu_staff', title: '👤 Staff se Baat', description: 'Insaani madad, 5 minute mein' },
         ],
       },
@@ -58,8 +58,15 @@ export async function routeFlow(from, rawText, msg, customer) {
   }
 
   if (text === 'menu_visit') {
-    updateCustomer(from, { state: 'BOOKING' });
-    await wa.sendText(from, `📅 *Visit booking:*\nKal kaunsa waqt aapko suit karta hai? (maslan "kal 5 baje")\n\n🎟️ Token mil jayega — store par wait nahi karna parega!\n\n📍 Location: Khanewal city center, ${catalog().policies.timing}`);
+    // V1-0 TRUTH CUT (2026-09-09): booking backend does NOT exist — "Token mil jayega"
+    // was a phantom promise. Truth: no slot/token from WhatsApp; real path = staff.
+    // (state 'BOOKING' no longer set — nothing consumes it; it was a false signal.)
+    await wa.sendText(from,
+      `📅 *Store Visit*\n` +
+      `⚠️ WhatsApp se visit appointment book karna abhi possible nahi — hum aapke liye slot confirm nahi kar sakte. 🙏\n` +
+      `🕙 Timing: ${catalog().policies.timing}\n` +
+      `📍 Khanewal city center\n` +
+      `💬 *staff* likhein — team aapki madad kare gi.`);
     return true;
   }
 
@@ -91,24 +98,33 @@ export async function routeFlow(from, rawText, msg, customer) {
     const estimate = estimateTradeIn(parts[1], parts[2]);
     await wa.sendButtons(from, estimate.text, [
       { id: 'menu_phones', title: '📱 Naya phone choose' },
-      { id: 'menu_visit', title: '📅 Visit book karein' },
+      { id: 'menu_visit', title: '📅 Timing & pata' },
       { id: 'menu_staff', title: '👤 Staff se baat' },
     ]);
     return true;
   }
 
-  // ── Reserve: "reserve reno13" ──
+  // ── Reserve intent: V1-0 TRUTH CUT (2026-09-09) ──
+  // Online reservation DOES NOT exist (no backend, no persistence, no hold).
+  // Old "✅ RESERVED! / Token NK-… / 24 ghante aapke naam par" was a phantom
+  // (registry CAP-006: REDESIGN_REQUIRED — truth violation). No token, no hold,
+  // no slot, no watch promise — only catalog truth + the real human path.
+  // Capability remains NOT IMPLEMENTED by design: V1-0 removes the lie, it does
+  // not build the reservation feature (no persistence/slots/token semantics).
   if (text.startsWith('reserve')) {
-    const p = findProduct(text.split(/\s+/)[1] || '');
-    if (!p) {
-      await wa.sendText(from, 'Kaunsa phone reserve karna hai? Maslan: "reserve reno13"');
-      return true;
-    }
-    if (p.stock < 1) {
-      await wa.sendText(from, `😔 *${p.name}* abhi stock mein nahi. "watch ${p.id}" likhein — stock aate hi sab se pehle aapko khabar milegi!`);
-      return true;
-    }
-    await wa.sendText(from, `✅ *RESERVED!* 🎉\n\n📱 ${p.name} (${p.variant})\n💰 ${formatPrice(p.price)}\n⏰ 24 ghante tak aapke naam par\n🎟️ Token: *NK-${Date.now().toString().slice(-6)}*\n\nStore par token dikha kar le jayein. ${catalog().policies.reserve}`);
+    // Empty query guard: findProduct('') matches the FIRST product (includes('')
+    // is true for all names) — quoting a3x on a bare "reserve" would be a false
+    // attribution, so only a real, non-empty model token may resolve a product.
+    const q = text.split(/\s+/)[1] || '';
+    const p = q ? findProduct(q) : null;
+    const info = p
+      ? `📱 *${p.name}* (${p.variant}) — aaj ki price: *${formatPrice(p.price)}*\n📦 Stock abhi: ${p.stock} pieces\n\n`
+      : '';
+    await wa.sendText(from,
+      info +
+      `⚠️ WhatsApp se online reservation abhi available nahi — hum phone aapke naam hold nahi kar sakte. 🙏\n` +
+      `🏪 Seedha store par aayen, ya *staff* likh kar team se baat karein.\n` +
+      `🕙 ${catalog().policies.timing}`);
     return true;
   }
 
