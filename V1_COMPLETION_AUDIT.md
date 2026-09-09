@@ -70,7 +70,7 @@ CAP-020/021 voice (ur/pa), CAP-022..024 vision/TTS, CAP-023 price-match, CAP-025
 |---|---|---|---|---|
 | **V1-0** | Kill phantom reservation tokens + all lying texts | customer-facing "confirms" that confirm nothing break the no-lie law | registry CAP-006 row; FEASIBILITY truth rule | **CLOSED 2026-09-09 — VR-2026-09-09-01** (commit `b9e6eb6`, merge `36ca9df`) |
 | **V1-1** | Conversation memory / multi-turn context | "autonomously handling conversations" is the product's spine; model is amnesiac per message | user's core objective + `brain.js` evidence | **CLOSED 2026-09-09 — VR-2026-09-09-02** (commit `47a2c16`, merge `bad2d30`) |
-| **V1-2** | Catalog authority semantics (staleness on quoted prices + owner-update ritual) | shop workflow = quoting REAL prices; any JSON date is silently "today" | CAP-003 registry row (`observed_at VERIFIED|STALE`); P3 standby | open |
+| **V1-2** | Catalog authority semantics (staleness on quoted prices + owner-update ritual) | shop workflow = quoting REAL prices; any JSON date is silently "today" | CAP-003 registry row (`observed_at VERIFIED|STALE`); P3 standby | **CLOSED 2026-09-09 — VR-2026-09-09-03** (commit `e95fdb9`, merge `b62ed87`) |
 | **V1-3** | Deterministic negotiation rules engine (bounded floors; LLM only phrases) | "strong negotiation within approved business rules"; LLM price authority forbidden | FEASIBILITY §1 #7 + CAP-039 row | **blocked on owner: floors list** |
 | **V1-4** | Post-purchase / satisfaction follow-up cadence (opt-in, consent-gated, kill-switch-compatible) | sales don't end at purchase | CAP-032 row | **blocked on owner: timing/content spec** |
 | **V1-5** | Real-pilot readiness: Meta webhook live, live-mode smoke list, DEBT-19 cookie/rate-limit, quality-rating unwiring | without it nothing is more than a demo | CAP-011 PILOT notes ("real Meta pending Phase-5"); BLOCKERS B-2 | open |
@@ -101,6 +101,13 @@ CAP-020/021 voice (ur/pa), CAP-022..024 vision/TTS, CAP-023 price-match, CAP-025
 V1-0 + V1-1 combined ("truth cut + memory"): (a) remove/replace phantom reservation + lying texts; then (b) wire bounded conversation history into `think()`. **Executed in two authorized cycles:** (a) done as **V1-0 (this cycle, VR-2026-09-09-01)**; (b) = **V1-1, awaiting explicit authorization.**
 
 ---
+
+## V1-2 closure record (2026-09-09)
+
+- **Contract:** from the CAP-003 registry row ONLY (TTL 24h; VERIFIED|STALE; ±25%; "always dated, never AI-invented"; stale → "rates kal ke ho sakte hain — confirm karein" + scarcity auto-disabled; corrupt → "rates par kaam jaari hai" + handoff, never last-good (§27); owner file beats LLM memory ALWAYS; human approval on >25% price jump; acceptance "0 undated prices in any output"). Nothing invented.
+- **Implemented:** `catalog.js` authority layer (VERIFIED/STALE/UNKNOWN per product; corrupt sentinel; the only customer-facing price/stock formatters; deterministic prompt labels; no cache — file IS the state); per-product `observed_at` + `verified_price` in the existing `products.json` (shipped honestly STALE at 2026-09-05); brain prompt rule 8 (model phrases, never relabels; customer-stated prices are requests, not data) + status-aware fallback + `evidence{observed_at, status:'VERIFIED'}` on the EXISTING P2 EVIDENCE stage (verified-only; absent ⇒ class rules); router menu/reserve/EMI status-aware (EMI table only from VERIFIED; declared-input math preserved); scheduler honest line on corrupt; `scripts/verify-catalog.mjs` owner ritual (check / --verify / >25% jump refused without `--approve-jump`; local, no UI) — the file's ONLY writer (static-proven; no remote/customer/LLM write path).
+- **Verification:** `tests/v12authority.test.js` 16/16 on the real path (webhook → flows/brain → firewall → outbox spy; LLM capture double; real file patched per state, restored in teardown); suite 106/106 ×5 (3 pre-merge + 2 post-merge); cap055 14/14 ×3; foundations byte-untouched; adversarial: verified/stale/missing/malformed/future observed_at, missing product, zero stock, malformed price, corrupt catalog, fake-price injection (file hash immutable), per-request label recompute + V1-1 interplay, no promotion code path (grep), restart persistence (cross-process), mixed catalog, EMI gate, ritual + jump approval.
+- **Commit:** `e95fdb946cc9f52f3fae982a58bddba83a5e77af` · **Merge:** `b62ed8796814c2e8fac4ea598f64d56bbca10f6d` (main HEAD) · **VR:** VR-2026-09-09-03 · CAP-003: PROTOTYPE → PILOT (live in demo; audit gate B-1 open; real-rate truth depends on the owner ritual).
 
 ## V1-1 closure record (2026-09-09)
 

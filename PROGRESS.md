@@ -10,6 +10,7 @@
 | 2026-09-08 | P2 audit-integrity remediation | DONE — no product change; audit-gate gap formalized, regressions proven | VR-2026-09-08-04 |
 | 2026-09-09 | V1 completion audit (analysis-only) + **V1-0 truth cut** | SHIPPED — phantom reservation/booking/token removed from all customer-facing paths; 78/78 (11 new); CAP-006 → NOT_PROVEN (honest deferral) | VR-2026-09-09-01 |
 | 2026-09-09 | **V1-1 conversation memory** | SHIPPED — brain.think() now context-aware: bounded (12 entries × 500 chars) per-customer multi-turn context, derived-only, DEBT-18 compliant; 90/90 (12 new) | VR-2026-09-09-02 |
+| 2026-09-09 | **V1-2 catalog authority semantics** | SHIPPED — freshness-aware dated price truth (VERIFIED/STALE/UNKNOWN, 24h TTL, 0 undated prices); stale never quoted as fresh; corrupt → honest handoff; owner verify ritual + >25% jump gate; evidence{observed_at,status} on P2 EVIDENCE stage; CAP-003 → PILOT; 106/106 (16 new) | VR-2026-09-09-03 |
 
 Pending (in order of the V1 list, see `V1_COMPLETION_AUDIT.md`): **V1-2 catalog authority/staleness** (next, needs explicit authorization); V1-3 negotiation rules engine (needs owner floors); V1-4 post-purchase follow-up cadence (needs owner spec); V1-5 real-pilot readiness. Older roadmap still valid: P3 data → P4/CAP-009 → per-capability production gates → Phase 5 real pilot.
 OFF until gated: CAP-006 reservations (capability absent — honest deferral live since V1-0), CAP-007 marketing.
