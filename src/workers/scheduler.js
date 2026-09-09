@@ -13,13 +13,18 @@ export function startScheduler() {
   cron.schedule('0 4 * * *', async () => {
     const customers = allCustomers();
     const newToday = customers.filter((c) => c.lastSeen?.startsWith(today())).length;
-    const lowStock = catalog().products.filter((p) => p.stock <= 2);
+    // V1-2 (CAP-003): corrupt catalog → honest line, never "sab theek" on missing data.
+    const cat = catalog();
+    const lowStock = cat.corrupted ? null : cat.products.filter((p) => p.stock <= 2);
+    const lowStockLine = cat.corrupted
+      ? '⚠️ CATALOG UNAVAILABLE — products.json check karein'
+      : (lowStock.length ? lowStock.map((p) => `${p.name} (${p.stock})`).join(', ') : 'sab theek ✅');
 
     const brief =
       `☀️ *Assalam o Alaikum Boss! NOOR Morning Brief*\n\n` +
       `👥 Total customers: ${customers.length}\n` +
       `🆕 Kal active: ${newToday}\n` +
-      `📦 Low stock alert: ${lowStock.length ? lowStock.map((p) => `${p.name} (${p.stock})`).join(', ') : 'sab theek ✅'}\n` +
+      `📦 Low stock alert: ${lowStockLine}\n` +
       `🛡️ Quality rating: GREEN (monitoring active)\n\nAaj ka din mubarak ho! 🚀`;
 
     log.info('Owner brief ready');

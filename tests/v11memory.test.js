@@ -104,6 +104,17 @@ const B = '923001110022';
 const C = '923001110023';
 const D = '923001110024';
 
+// V1-2 fixture: owner-just-verified catalog (observed_at=now) so this suite's
+// EMI assertion ('EMI Plan') sees VERIFIED price data; shipped file restored in
+// teardown. (Authority states themselves are v12authority.test.js's job.)
+const PRODUCTS_FILE = path.join(REPO, 'src/data/products.json');
+const originalCatalog = fs.readFileSync(PRODUCTS_FILE, 'utf8');
+{
+  const c = JSON.parse(originalCatalog);
+  c.products.forEach((p) => { p.observed_at = new Date().toISOString(); });
+  fs.writeFileSync(PRODUCTS_FILE, JSON.stringify(c, null, 2));
+}
+
 const sign = (body) => 'sha256=' + crypto.createHmac('sha256', 'testsecret-v11').update(body).digest('hex');
 let seq = 0;
 const eventBody = (msg) =>
@@ -330,6 +341,7 @@ test('M12. corrupt DB file → [] (no crash); missing DB file → [] (no crash)'
 
 // ── teardown ─
 test('teardown', () => {
+  fs.writeFileSync(PRODUCTS_FILE, originalCatalog);
   mainOutbox.stop();
   server.close();
   llmServer.close();

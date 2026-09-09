@@ -49,6 +49,16 @@ const { buildApp } = await import('../src/app.js');
 const CUSTOMER = '923001110010';
 const PRODUCTS_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), '../src/data/products.json');
 
+// V1-2 fixture: owner-just-verified catalog (observed_at=now) — deterministic
+// FRESH-data state for this suite's price assertions (shipped file restored in
+// teardown; VERIFIED/STALE/UNKNOWN/corrupt states are v12authority.test.js's job).
+const originalCatalog = fs.readFileSync(PRODUCTS_FILE, 'utf8');
+{
+  const c = JSON.parse(originalCatalog);
+  c.products.forEach((p) => { p.observed_at = new Date().toISOString(); });
+  fs.writeFileSync(PRODUCTS_FILE, JSON.stringify(c, null, 2));
+}
+
 auditMod.initAudit();
 idem.initIdempotency();
 
@@ -247,8 +257,9 @@ test('T10. "location" → behavior identical to pre-V1-0', async () => {
   verdict('T10 unrelated flow intact', 'location response unchanged', 'asserted clean', 'no unrelated product behavior changed (spot-check: location flow)', 'every other flow byte-identically (full-suite + diff review cover the rest)');
 });
 
-// ── teardown: stop the outbox so the process can exit cleanly ──
+// ── teardown: restore shipped catalog + stop the outbox so the process can exit ──
 test('teardown', () => {
+  fs.writeFileSync(PRODUCTS_FILE, originalCatalog);
   mainOutbox.stop();
   server.close();
 });

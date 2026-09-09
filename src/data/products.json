@@ -1,6 +1,6 @@
 {
   "updated": "2026-09-05",
-  "note": "⚠️ SAMPLE prices — owner rozana update karega. AI sirf yahi prices quote karta hai, kabhi khud se nahi banata.",
+  "note": "⚠️ SAMPLE prices — owner rozana update karega. AI sirf yahi prices quote karta hai, kabhi khud se nahi banata. Verification ritual: owner prices/stock update karne ke baad `node scripts/verify-catalog.mjs --verify` chalata hai (24h TTL — uske baad rates STALE hain aur sirf 'aakhri verified price' ke roop mein dikhte hain).",
   "products": [
     {
       "id": "a3x",
@@ -8,6 +8,8 @@
       "variant": "4GB / 64GB",
       "price": 34999,
       "stock": 7,
+      "observed_at": "2026-09-05T09:00:00Z",
+      "verified_price": 34999,
       "highlights": ["5100mAh battery", "45W SUPERVOOC", "Military-grade shock resistance"],
       "tags": ["budget", "battery", "students"]
     },
@@ -17,6 +19,8 @@
       "variant": "8GB / 128GB",
       "price": 54999,
       "stock": 5,
+      "observed_at": "2026-09-05T09:00:00Z",
+      "verified_price": 54999,
       "highlights": ["Snapdragon 680", "50MP camera", "5000mAh"],
       "tags": ["midrange", "camera"]
     },
@@ -26,6 +30,8 @@
       "variant": "8GB / 256GB",
       "price": 84999,
       "stock": 4,
+      "observed_at": "2026-09-05T09:00:00Z",
+      "verified_price": 84999,
       "highlights": ["AI Portrait camera", "120Hz AMOLED", "Slim design"],
       "tags": ["camera", "gaming", "style"]
     },
@@ -35,6 +41,8 @@
       "variant": "12GB / 256GB",
       "price": 139999,
       "stock": 3,
+      "observed_at": "2026-09-05T09:00:00Z",
+      "verified_price": 139999,
       "highlights": ["Dimensity 8350", "AI Livephoto", "IP69 waterproof"],
       "tags": ["flagship", "camera", "pubg", "gaming"]
     },
@@ -44,6 +52,8 @@
       "variant": "16GB / 512GB",
       "price": 249999,
       "stock": 2,
+      "observed_at": "2026-09-05T09:00:00Z",
+      "verified_price": 249999,
       "highlights": ["Hasselblad camera", "Dimensity 9400", "Premium flagship"],
       "tags": ["flagship", "camera", "premium"]
     }
