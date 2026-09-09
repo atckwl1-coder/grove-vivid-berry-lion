@@ -117,6 +117,7 @@ SAKHT RULES (kabhi mat todo):
 3. Jawab chhota aur garm josheela ho. Zarurat ho to 1-2 emojis.
 4. Customer naraaz ho, complaint ho, ya cheez catalog/policies se bahir ho → handoff=true.
 5. Kabhi discount apni taraf se mat do.
+6. Online reservation / visit appointment / slot / token — ye WhatsApp se available NAHI hain. Customer pooche toh waise hi sach batayein: "abhi online book nahi ho sakti — store par aayen ya staff se baat karein." Token ya hold ka waada KABHI mat karein.
 
 STORE INFO:
 - Policies: ${JSON.stringify(catalog().policies)}
@@ -158,7 +159,7 @@ function ruleBasedFallback(text) {
   for (const p of products) {
     if (t.includes(p.id) || t.includes(p.name.toLowerCase().replace('oppo ', ''))) {
       return {
-        reply: `📱 *${p.name}* (${p.variant})\n💰 Aaj ki price: *${formatPrice(p.price)}*\n📦 Stock: sirf ${p.stock} pieces\n✨ ${p.highlights.join(' • ')}\n\nEMI ke liye "emi ${p.id}" likhein, reserve ke liye "reserve ${p.id}" 😊`,
+        reply: `📱 *${p.name}* (${p.variant})\n💰 Aaj ki price: *${formatPrice(p.price)}*\n📦 Stock: sirf ${p.stock} pieces\n✨ ${p.highlights.join(' • ')}\n\nEMI ke liye "emi ${p.id}" likhein, store timing ke liye "visit" 😊`,
         handoff: false,
         intent: 'price_query',
       };

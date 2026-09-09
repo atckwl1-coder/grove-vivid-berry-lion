@@ -16,5 +16,5 @@ export function emiPlanFor(price, months = 6, monthlyRate = 0.03) {
     })
     .join('\n');
 
-  return `💳 *EMI Plan — ${formatPrice(price)} ke liye:*\n\n${table}\n\n📄 Phone lene ke liye sirf CNIC chahiye. Store par 10 minute ka kaam!\n"visit" likh kar appointment lein 📅`;
+  return `💳 *EMI Plan — ${formatPrice(price)} ke liye:*\n\n${table}\n\n📄 Phone lene ke liye sirf CNIC chahiye. Store par 10 minute ka kaam!\n*visit* likhein to timing aur pata mil jayega 📅`;
 }
