@@ -60,6 +60,34 @@ export function recentMessages(phone, n = 20) {
   return db.messages.filter((m) => m.phone === phone).slice(-n);
 }
 
+// ── V1-1 (2026-09-09): bounded MODEL-context transcript — DERIVED, no new storage.
+// Same source of truth as the CAP-008 §6 staff context (db.messages), mapped to
+// model roles: inbound → 'user' (untrusted customer content), outbound text →
+// 'assistant' (what the customer saw). Contract — smallest deterministic policy
+// (assumptions documented, nothing invented beyond repo conventions):
+//   • per-customer   : hard filter by phone (isolation)
+//   • bounded        : last `n` eligible entries (default 12 ≈ 6 turns); each
+//                      entry ≤ 500 chars (existing log truncation) → ≤ 6000 chars
+//   • ordering       : chronological (array push order)
+//   • skips          : empty/non-string text; inbound internal flow tokens
+//                      (/^menu_[a-z_]+$/ — button/list ids, not customer language)
+//   • persistence    : existing customers-DB semantics (save() on every log;
+//                      loadDb() restores at boot; parse-corrupt → fresh start)
+//   • schema-corrupt : [] — fail-safe (valid JSON, wrong shape); stricter here
+//                      than recentMessages because this feeds a model
+// Sensitive-zone rule (DEBT-18): ONLY this customer's own conversation text may
+// enter the LLM — no other-customer content, no phone numbers in content, no new
+// storage, no change to redacted surfaces (audit/demo) or to log semantics.
+export function recentConversation(phone, n = 12) {
+  const rows = Array.isArray(db.messages) ? db.messages : [];
+  return rows
+    .filter((m) => m.phone === phone)
+    .filter((m) => typeof m.text === 'string' && m.text.trim() !== '')
+    .filter((m) => !(m.dir === 'in' && /^menu_[a-z_]+$/.test(m.text.trim())))
+    .slice(-n)
+    .map((m) => ({ role: m.dir === 'in' ? 'user' : 'assistant', content: m.text.slice(0, 500) }));
+}
+
 // Outbound logging via whatsapp chokepoint (wired at boot): inbox view marks [BOT] vs [STAFF•id]
 export function logOutbound(phone, text, meta = {}) {
   db.messages.push({
