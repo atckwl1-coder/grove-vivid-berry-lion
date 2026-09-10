@@ -125,6 +125,26 @@ export function recordNegotiation(rec) {
 }
 export const negotiationOutcomes = () => (Array.isArray(db.negotiations) ? db.negotiations : []);
 
+// ── V1-4 (2026-09-10): post-purchase follow-up records — the lifecycle of
+// the single satisfaction follow-up per qualifying purchase. Stored in the
+// existing customers DB (no new store). Creation is claimed via the existing
+// claimEvent() mechanism (one atomic claim per sale record), so restarts,
+// duplicate scheduler runs and duplicate events can never duplicate it.
+export function recordFollowup(rec) {
+  db.followups = Array.isArray(db.followups) ? db.followups : [];
+  if (!db.followups.some((f) => f.id === rec.id)) db.followups.push(rec);
+  if (db.followups.length > 1000) db.followups = db.followups.slice(-800);
+  save();
+}
+export const listFollowups = () => (Array.isArray(db.followups) ? db.followups : []);
+export const getFollowup = (id) => listFollowups().find((f) => f.id === id) || null;
+export function patchFollowup(id, patch) {
+  const f = getFollowup(id);
+  if (f) Object.assign(f, patch);
+  save();
+  return f || null;
+}
+
 export const allCustomers = () => Object.values(db.customers);
 export const today = () => new Date().toISOString().slice(0, 10);
 

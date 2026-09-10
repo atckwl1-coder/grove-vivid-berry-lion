@@ -6,6 +6,7 @@ import { config } from '../config.js';
 import * as wa from '../services/whatsapp.js';
 import { allCustomers, today } from '../services/customers.js';
 import { catalog } from '../services/catalog.js';
+import { sweepFollowUps } from '../services/followups.js';
 import { log } from '../utils/logger.js';
 
 export function startScheduler() {
@@ -38,5 +39,19 @@ export function startScheduler() {
     log.info('Quality rating check (heartbeat) ✅');
   });
 
-  log.info('⏰ Scheduler started (owner brief 9AM PKT, quality check hourly)');
+  // V1-4 (2026-09-10): post-purchase satisfaction follow-up sweep — every
+  // 15 minutes. The follow-up itself fires at exactly sale+10d (the dueAt is
+  // deterministic and file-persistent); the sweep interval only bounds
+  // "approximately Day 10" (worst case: ≤15 min late). Scheduling + dispatch
+  // are idempotent (existing claimEvent + status lifecycle) — repeated runs
+  // can never duplicate a send.
+  cron.schedule('*/15 * * * *', async () => {
+    try {
+      await sweepFollowUps(); // async: a rejected send must resolve into a status, not a lost promise
+    } catch (e) {
+      log.error('Follow-up sweep failed:', e?.message || e);
+    }
+  });
+
+  log.info('⏰ Scheduler started (owner brief 9AM PKT, quality check hourly, follow-up sweep 15min)');
 }
