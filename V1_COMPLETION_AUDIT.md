@@ -39,7 +39,7 @@ A webhook-upsert → **verified-ingest → dedupe → brain (rules/flows/LLM) �
 
 | Feature | Evidence of absence |
 |---|---|
-| Post-purchase follow-up (CAP-032 Day0/3/15/30) | grep `follow.?up|post.?purchase` over src = **0 hits** (→ V1-4, needs owner cadence spec) |
+| Post-purchase follow-up (CAP-032 Day0/3/15/30) | ~~grep `follow.?up|post.?purchase` over src = **0 hits** (→ V1-4, needs owner cadence spec)~~ — **V1-4 (2026-09-10, VR-2026-09-10-03): first touch live** (`src/services/followups.js` — single Day-10 satisfaction check per customer-stated sale; the full journey still unbuilt by directive) |
 | Satisfaction/issue follow-up engine | 0 hits; complaints only escalate at receipt time |
 | Deterministic negotiation/floor engine (CAP-039) | 0 hits; feasibility §1 #7 demands rules-engine + LLM-phrasing; **no floors/limits exist anywhere** (→ V1-3, needs owner rules) |
 | Voice-note STT (CAP-020) | `media.js` returns null — labeled stub, Whisper TODO |
@@ -57,7 +57,7 @@ Also absent (verified): **task/commitment extraction — no requirement found in
 | Any VERIFIED_PRODUCTION claim | B-2: real Meta pilot (Phase 5) never run |
 | Campaigns / outbound marketing (CAP-007) | OFF by fast-track law; governor unwired (DEBT-09); quality-rating integration TODO |
 | Negotiation engine (V1-3) | **Requirement absent** — no floor prices / max-discount / margin rules in any doc; building them = fabrication; owner input required |
-| Follow-up cadence (V1-4) | **Requirement absent** — no timing/content spec present; CAP-032 claim only |
+| Follow-up cadence (V1-4) | ~~**Requirement absent** — no timing/content spec present; CAP-032 claim only~~ — **supplied by the owner in the V1-4 directive (2026-09-10): single follow-up ~Day 10 + approved message + response routing; implemented (VR-2026-09-10-03)** |
 | OPPO warranty API, PTA API, video-call demos, Saraiki, review-gating | Externally infeasible / policy-violating — verified in FEASIBILITY_AUDIT §1 (conditions 1–6) |
 
 ## 6. OPTIONAL / POST-V1 (not required for the store workflow)
@@ -72,7 +72,7 @@ CAP-020/021 voice (ur/pa), CAP-022..024 vision/TTS, CAP-023 price-match, CAP-025
 | **V1-1** | Conversation memory / multi-turn context | "autonomously handling conversations" is the product's spine; model is amnesiac per message | user's core objective + `brain.js` evidence | **CLOSED 2026-09-09 — VR-2026-09-09-02** (commit `47a2c16`, merge `bad2d30`) |
 | **V1-2** | Catalog authority semantics (staleness on quoted prices + owner-update ritual) | shop workflow = quoting REAL prices; any JSON date is silently "today" | CAP-003 registry row (`observed_at VERIFIED|STALE`); P3 standby | **CLOSED 2026-09-09 — VR-2026-09-09-03** (commit `e95fdb9`, merge `b62ed87`) |
 | **V1-3** | Deterministic negotiation rules engine (bounded floors; LLM only phrases) | "strong negotiation within approved business rules"; LLM price authority forbidden | FEASIBILITY §1 #7 + CAP-039 row | **CLOSED 2026-09-10 — VR-2026-09-10-01** (commit `bab727f`, merge `c331a1f`) — owner floors supplied: reno16 floor (RESOLVED — **corrected to the owner-supplied dealer-price boundary Rs. 186,800 on 2026-09-10, VR-2026-09-10-02**; the 186,499 recorded at closure time was a mis-recorded value); reno16f 139k–142k (UNRESOLVED → no autonomous concession, tracked as B-7) |
-| **V1-4** | Post-purchase / satisfaction follow-up cadence (opt-in, consent-gated, kill-switch-compatible) | sales don't end at purchase | CAP-032 row | **blocked on owner: timing/content spec** |
+| **V1-4** | Post-purchase / satisfaction follow-up cadence (opt-in, consent-gated, kill-switch-compatible) | sales don't end at purchase | CAP-032 row | **CLOSED 2026-09-10 — VR-2026-09-10-03** (commit `f113e50`, merge `51fb389`) — owner spec supplied in the V1-4 directive (single follow-up ~Day 10, owner-approved message, positive→close / issue→existing support path, no chasing). Delivered as the CAP-032 **first touch** — the full Day0/3/15/30 journey remains out of scope per the cycle directive. 155/155 (17 new) |
 | **V1-5** | Real-pilot readiness: Meta webhook live, live-mode smoke list, DEBT-19 cookie/rate-limit, quality-rating unwiring | without it nothing is more than a demo | CAP-011 PILOT notes ("real Meta pending Phase-5"); BLOCKERS B-2 | open |
 
 ## 9. DEPENDENCIES
@@ -81,7 +81,7 @@ CAP-020/021 voice (ur/pa), CAP-022..024 vision/TTS, CAP-023 price-match, CAP-025
 
 ## 10. BIGGEST ACTUAL BLOCKERS TO A USABLE V1
 
-1. **Requirement holes, not code holes:** floors (V1-3) and follow-up cadence (V1-4) don't exist anywhere — owner input required; fabricating them is forbidden.
+1. ~~**Requirement holes, not code holes:** floors (V1-3) and follow-up cadence (V1-4) don't exist anywhere — owner input required; fabricating them is forbidden.~~ — **both holes closed by owner input (2026-09-10): floors → V1-3 + VR-2026-09-10-02 correction; follow-up spec → V1-4 (VR-2026-09-10-03).**
 2. ~~**LLM amnesia** (no message history to the model)~~ — **closed by V1-1 (2026-09-09): bounded per-customer multi-turn context in `think()` (12 entries × 500 chars, derived-only, DEBT-18 compliant).**
 3. **Data authority is a hand-edited SAMPLE JSON** — acceptable for demo, unacceptable as price truth without staleness + owner-update ritual (→ V1-2). *(V1-0 side-effect: file is now at least version-controlled.)*
 4. ~~An actively-false UX in the menu ("RESERVED" phantom tokens)~~ — **removed by V1-0 (2026-09-09).**
