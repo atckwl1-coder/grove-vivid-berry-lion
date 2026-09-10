@@ -11,6 +11,7 @@ import { routeFlow } from '../flows/router.js';
 import { touchCustomer, logMessage, setConsent, updateCustomer, recentConversation } from './customers.js';
 import { catalog, formatPrice, priceCardLine, stockLine, productStatus, modelCatalogLine, isCatalogCorrupted, observedAtIso } from './catalog.js';
 import { transcribeVoiceNote, analyzePhonePhoto } from './media.js';
+import { noteFollowUpAfterBrain } from './followups.js';
 import { log } from '../utils/logger.js';
 import * as conversations from '../sentinel/conversations.js';
 
@@ -57,7 +58,9 @@ export async function handleIncomingMessage(msg, profileName) {
     if (!text2) {
       return wa.sendText(from, 'Maaf kijiye, voice note samajh nahi aayi. Thora sa type kar dein ya dobara bhejein? 🎤');
     }
-    return thinkAndReply(from, text2, customer, true);
+    await thinkAndReply(from, text2, customer, true);
+    noteFollowUpAfterBrain(from); // V1-4: follow-up lifecycle bookkeeping (deterministic)
+    return;
   }
 
   // ── 2. Photo (trade-in / price-match / model identify) ──
@@ -75,7 +78,9 @@ export async function handleIncomingMessage(msg, profileName) {
   if (handled) return;
 
   // ── 4. AI Brain ──
-  return thinkAndReply(from, text, customer, false);
+  const aiReply = await thinkAndReply(from, text, customer, false);
+  noteFollowUpAfterBrain(from); // V1-4: follow-up lifecycle bookkeeping (deterministic)
+  return aiReply;
 }
 
 // §9: LLM sirf RECOMMEND karta hai; backend hi reason validate karta hai (closed set)

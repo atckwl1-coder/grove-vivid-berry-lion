@@ -9,6 +9,7 @@ import { estimateTradeIn } from '../services/tradein.js';
 import { updateCustomer } from '../services/customers.js';
 import { escalate } from '../sentinel/conversations.js';
 import { handleNegotiation } from '../services/negotiation.js';
+import { handleFollowUpResponse } from '../services/followups.js';
 
 export async function routeFlow(from, rawText, msg, customer) {
   const text = rawText.toLowerCase().trim();
@@ -135,6 +136,15 @@ export async function routeFlow(from, rawText, msg, customer) {
     ]);
     return true;
   }
+
+  // ── V1-4 (2026-09-10): post-purchase follow-up response ──
+  // Deterministic fast path for the Day-10 health check: positive reply →
+  // natural acknowledgement + close; issue reply → the existing CAP-008
+  // support/escalation path. Fires ONLY when the customer has an open
+  // (SENT) follow-up and no active negotiation session; everything else
+  // falls through to the normal flow/AI conversation path.
+  const fuHandled = await handleFollowUpResponse(from, text, customer);
+  if (fuHandled) return true;
 
   // ── V1-3 NEGOTIATION FLOW (2026-09-10, CAP-039) ──
   // Deterministic engine owns every number: floor/step/concession come from
