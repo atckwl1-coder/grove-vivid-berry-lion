@@ -101,13 +101,40 @@ export function menuPriceLine(p, now = Date.now()) {
 
 // LLM prompt line — deterministic label. The model may only PHRASE; it may
 // never reclassify, never relabel STALE as current, never quote UNKNOWN.
+// V1-3: products may legitimately omit variant/stock/highlights (owner supplied
+// only price) — optional fields render as 'n/a'/omitted, NEVER 'undefined'
+// (V1-2 no-undefined discipline extended to optional fields).
 export function modelCatalogLine(p, now = Date.now()) {
   if (isCatalogCorrupted()) return 'CATALOG_UNAVAILABLE — rates par kaam jaari hai; koi price/stock number quote NAHI karein; handoff=true';
   const { status, observedAt } = productStatus(p, now);
-  const base = `- ${p.name} (${p.variant}): `;
-  if (status === 'VERIFIED') return `${base}Rs.${p.price} — VERIFIED (${observedAtIso(observedAt)}); stock ${p.stock}; ${p.highlights.join(', ')}`;
-  if (status === 'STALE') return `${base}Rs.${p.price} — STALE (aakhri verification ${observedAtIso(observedAt)}); sirf "aakhri verified price" + "rates kal ke ho sakte hain — confirm karein" ke saath quote karein — "aaj ki price" NAHI; stock/scarcity MAT bolo; ${p.highlights.join(', ')}`;
+  const variant = p.variant ? ` (${p.variant})` : '';
+  const stockTxt = Number.isFinite(Number(p.stock)) ? `stock ${p.stock}; ` : 'stock n/a; ';
+  const highlights = Array.isArray(p.highlights) && p.highlights.length ? p.highlights.join(', ') : '';
+  const base = `- ${p.name}${variant}: `;
+  if (status === 'VERIFIED') return `${base}Rs.${p.price} — VERIFIED (${observedAtIso(observedAt)}); ${stockTxt}${highlights}`;
+  if (status === 'STALE') return `${base}Rs.${p.price} — STALE (aakhri verification ${observedAtIso(observedAt)}); sirf "aakhri verified price" + "rates kal ke ho sakte hain — confirm karein" ke saath quote karein — "aaj ki price" NAHI; stock/scarcity MAT bolo; ${highlights}`;
   return `${base}PRICE_UNVERIFIED — koi number quote NAHI karein; customer ko "price confirm nahi ho sakti — staff se baat karein" batayein`;
+}
+
+// V1-3: single source for P2 EVIDENCE objects (existing stage semantics,
+// CAP-003): attached ONLY for VERIFIED products; STALE/UNKNOWN → null (absent
+// evidence ⇒ class rules govern). Consumers: negotiation engine (V1-3).
+// Kept here so catalog authority + evidence construction never split.
+export function catalogEvidence(p, now = Date.now()) {
+  if (isCatalogCorrupted()) return null;
+  const { status, observedAt } = productStatus(p, now);
+  if (status !== 'VERIFIED' || !observedAt) return null;
+  return { source: 'catalog:products.json', observed_at: new Date(observedAt).toISOString(), status: 'VERIFIED' };
+}
+
+// V1-3: approved value stack — ONLY owner-supplied `claim` strings are
+// customer-quotable. `conditional` claims (e.g. account-dependent Google
+// benefits) require customer-account evidence that this deployment has NO
+// source for → structurally excluded from every automatic statement.
+export function approvedBenefitsLine(p) {
+  const b = Array.isArray(p?.benefits) ? p.benefits : [];
+  const claims = b.filter((x) => typeof x?.claim === 'string' && x.claim.trim() !== '').map((x) => x.claim);
+  return claims.length ? claims.join(' + ') : '';
 }
 
 // Corrupt-safe policy text (flows never print "undefined" when the file is down).

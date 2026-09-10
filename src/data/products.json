@@ -1,5 +1,5 @@
 {
-  "updated": "2026-09-05",
+  "updated": "2026-09-10",
   "note": "⚠️ SAMPLE prices — owner rozana update karega. AI sirf yahi prices quote karta hai, kabhi khud se nahi banata. Verification ritual: owner prices/stock update karne ke baad `node scripts/verify-catalog.mjs --verify` chalata hai (24h TTL — uske baad rates STALE hain aur sirf 'aakhri verified price' ke roop mein dikhte hain).",
   "products": [
     {
@@ -45,6 +45,31 @@
       "verified_price": 139999,
       "highlights": ["Dimensity 8350", "AI Livephoto", "IP69 waterproof"],
       "tags": ["flagship", "camera", "pubg", "gaming"]
+    },
+    {
+      "id": "reno16",
+      "name": "OPPO Reno 16",
+      "price": 200000,
+      "observed_at": "2026-09-10T10:00:00Z",
+      "verified_price": 200000,
+      "note": "Owner-supplied price 2026-09-10 (V1-3). Stock not supplied — no stock field = no stock claim (never fabricated).",
+      "benefits": [
+        { "id": "gift_box", "claim": "Premium Reno series official gifting box included hai" },
+        { "id": "replacement_3m", "claim": "manufacturing fault par 3 mahine ka phone replacement protection" },
+        { "id": "s_care_3m", "claim": "3 mahine ka OPPO S Care package" },
+        { "id": "warranty_1y", "claim": "1 saal ki official OPPO warranty" },
+        { "id": "google_ai_pro", "claim": "Google Gemini / Google AI Pro activation aapke personal Gmail par (availability ke mutabiq)", "conditional": "current activation mein 5TB cloud storage / koi bhi duration — sirf customer ke actual account verification par claim ho sakta hai; is deployment mein account verification system NAHI hai, is liye ye claim NAHI hota (do not represent a future duration as guaranteed)" }
+      ],
+      "tags": ["flagship", "reno", "premium"]
+    },
+    {
+      "id": "reno16f",
+      "name": "OPPO Reno 16F",
+      "price": 150000,
+      "observed_at": "2026-09-10T10:00:00Z",
+      "verified_price": 150000,
+      "note": "Owner-supplied price 2026-09-10 (V1-3). Stock not supplied — no stock claim. No owner-approved benefits supplied for this model — none invented. Negotiation floor UNRESOLVED (negotiation-rules.json).",
+      "tags": ["reno", "premium"]
     },
     {
       "id": "findx8",

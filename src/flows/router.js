@@ -8,6 +8,7 @@ import { emiPlanFor } from '../services/emi.js';
 import { estimateTradeIn } from '../services/tradein.js';
 import { updateCustomer } from '../services/customers.js';
 import { escalate } from '../sentinel/conversations.js';
+import { handleNegotiation } from '../services/negotiation.js';
 
 export async function routeFlow(from, rawText, msg, customer) {
   const text = rawText.toLowerCase().trim();
@@ -44,7 +45,7 @@ export async function routeFlow(from, rawText, msg, customer) {
       return true;
     }
     const list = c.products
-      .map((p) => `📱 *${p.name}* (${p.variant})\n   ${menuPriceLine(p)}`)
+      .map((p) => `📱 *${p.name}*${p.variant ? ` (${p.variant})` : ''}\n   ${menuPriceLine(p)}`)
       .join('\n\n');
     const allVerified = c.products.length > 0 && c.products.every((p) => productStatus(p).status === 'VERIFIED');
     const header = allVerified
@@ -135,6 +136,14 @@ export async function routeFlow(from, rawText, msg, customer) {
     return true;
   }
 
+  // ── V1-3 NEGOTIATION FLOW (2026-09-10, CAP-039) ──
+  // Deterministic engine owns every number: floor/step/concession come from
+  // the owner files, never from the LLM. Fires on negotiation signals
+  // (discount/objection/price-to-pay/ready/walk) or an active session;
+  // plain price queries ("reno16 price") still go to the brain price card.
+  const negHandled = await handleNegotiation(from, text, msg, customer);
+  if (negHandled) return true;
+
   // ── Reserve intent: V1-0 TRUTH CUT (2026-09-09) ──
   // Online reservation DOES NOT exist (no backend, no persistence, no hold).
   // Old "✅ RESERVED! / Token NK-… / 24 ghante aapke naam par" was a phantom
@@ -156,7 +165,7 @@ export async function routeFlow(from, rawText, msg, customer) {
     // Corrupt catalog: the honest 'rates par kaam jaari hai' line appears even
     // when the product can't be looked up (CAP-003 provider_failure wording).
     const info = (p || isCatalogCorrupted())
-      ? `${p ? `📱 *${p.name}* (${p.variant})\n` : ''}${priceCardLine(p)}${p && sl ? '\n' + sl : ''}\n\n`
+      ? `${p ? `📱 *${p.name}*${p.variant ? ` (${p.variant})` : ''}\n` : ''}${priceCardLine(p)}${p && sl ? '\n' + sl : ''}\n\n`
       : '';
     await wa.sendText(from,
       info +

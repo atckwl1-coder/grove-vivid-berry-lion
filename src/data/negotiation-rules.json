@@ -1,0 +1,22 @@
+{
+  "note": "OWNER-APPROVED NEGOTIATION AUTHORITY (V1-3, 2026-09-10). Owner-edit ONLY — the bot, the engine, and the learning system NEVER write this file (learning changes tactics; owner rules change authority). floor_status=RESOLVED: exact autonomous floor owner-decided — the engine may negotiate from the catalog (starting) price down to this floor and NEVER below. floor_status=UNRESOLVED: owner supplied a range but not the exact floor — NO autonomous concession for that product until the owner resolves it (starting price only + staff path; the engine must not guess).",
+  "version": 1,
+  "policy": {
+    "concession_step_pct": 1.0,
+    "max_concessions_per_turn": 1,
+    "value_before_concession": true
+  },
+  "products": {
+    "reno16": {
+      "floor": 186499,
+      "floor_status": "RESOLVED",
+      "note": "Owner-supplied 2026-09-10: starting/customer price PKR 200,000 (catalog is the single price source); absolute autonomous floor PKR 186,499 — never offer below."
+    },
+    "reno16f": {
+      "floor": null,
+      "floor_status": "UNRESOLVED",
+      "owner_range": [139000, 142000],
+      "note": "Owner-supplied 2026-09-10: starting/customer price PKR 150,000 (catalog); floor range 139,000-142,000 — exact floor PENDING OWNER DECISION. Do not guess 139k/140k/141k/142k: until resolved, no autonomous concession for this model."
+    }
+  }
+}
