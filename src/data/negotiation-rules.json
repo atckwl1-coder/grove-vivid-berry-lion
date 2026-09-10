@@ -8,9 +8,9 @@
   },
   "products": {
     "reno16": {
-      "floor": 186499,
+      "floor": 186800,
       "floor_status": "RESOLVED",
-      "note": "Owner-supplied 2026-09-10: starting/customer price PKR 200,000 (catalog is the single price source); absolute autonomous floor PKR 186,499 — never offer below."
+      "note": "Owner-supplied 2026-09-10: selling price PKR 200,000 (catalog is the single price source); dealer price PKR 186,800; business intent = try to sell above dealer price and do not reduce into the dealer-price level. Authorized autonomous floor = PKR 186,800 (the explicitly supplied dealer-price boundary — never derived/rounded/altered); never offer below. (Corrected 2026-09-10 per owner authority instruction — supersedes the previously mis-recorded 186,499; see VR-2026-09-10-02.)"
     },
     "reno16f": {
       "floor": null,

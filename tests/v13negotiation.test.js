@@ -5,7 +5,7 @@
 //   "Best-price offers within floor" · "deterministic engine owns numbers;
 //    LLM may ONLY phrase; validator re-checks" · value before price ·
 //    a discount request does NOT automatically earn a discount ·
-//    floors: Reno 16 start 200,000 / floor 186,499 (RESOLVED) ·
+//    floors: Reno 16 start 200,000 / floor 186,800 (RESOLVED) ·
 //    Reno 16F start 150,000 / floor range 139k–142k (UNRESOLVED —
 //    must NOT be guessed) · learning changes tactics ONLY, never
 //    authority · truth: no fabricated scarcity/urgency/approval/
@@ -153,7 +153,7 @@ function verdict(name, expected, actual, proves, noProve) {
   console.log(`\n── ${name}\n   EXPECTED        : ${expected}\n   ACTUAL          : ${actual}\n   PROVES          : ${proves}\n   DOES NOT PROVE  : ${noProve}`);
 }
 
-const FLOOR = 186499;
+const FLOOR = 186800;
 const START = 200000;
 const STEP = 2000;
 const VALUE_SET = new Set(['SK-01', 'SK-02', 'SK-03', 'SK-04', 'SK-05', 'SK-06', 'SK-07', 'SK-08']);
@@ -170,12 +170,12 @@ test('N1. exact starting prices from the catalog (200,000 / 150,000), dated VERI
   verdict('N1 starting prices', 'exact owner-supplied prices, dated, no fabricated stock', 'asserted', 'price truth comes from the owner catalog (V1-2), not the negotiation engine', 'physical availability (no stock data supplied for these models)');
 });
 
-test('N2+N3. full-range Reno 16 negotiation: 200,000 → step ladder → EXACTLY 186,499 floor; never below', async () => {
+test('N2+N3. full-range Reno 16 negotiation: 200,000 → step ladder → EXACTLY 186,800 floor; never below', async () => {
   const phone = P();
   const replies = [];
   await sendFlow(phone, 'reno16 bohat zyada hai'); // turn 1: value-first (no number move)
   replies.push(textOf(toPhone(phone).slice(-1)[0]));
-  const expected = [198000, 196000, 194000, 192000, 190000, 188000, 186499];
+  const expected = [198000, 196000, 194000, 192000, 190000, 188000, 186800];
   for (let i = 0; i < 7; i++) {
     const r = await sendFlow(phone, 'sasta karo');
     replies.push(textOf(r));
@@ -188,17 +188,17 @@ test('N2+N3. full-range Reno 16 negotiation: 200,000 → step ladder → EXACTLY
   });
   const floorReply = await sendFlow(phone, 'aur kam karo'); // at floor → final position, no new number
   const ft = textOf(floorReply);
-  assert.ok(ft.includes('Rs. 186,499') && ft.includes('aakhri price'), 'floor stated as final position');
+  assert.ok(ft.includes('Rs. 186,800') && ft.includes('aakhri price'), 'floor stated as final position');
   const below = await sendFlow(phone, '180 k karo'); // below-floor push at floor → same floor line
-  assert.ok(textOf(below).includes('Rs. 186,499'), 'below-floor request at floor → floor held');
+  assert.ok(textOf(below).includes('Rs. 186,800'), 'below-floor request at floor → floor held');
   const all = nums(replies.join(' ') + ' ' + ft + ' ' + textOf(below));
   assert.ok(all.length > 0, 'numbers were quoted');
-  assert.equal(Math.min(...all), FLOOR, 'NEVER below the owner floor — exact floor 186,499');
+  assert.equal(Math.min(...all), FLOOR, 'NEVER below the owner floor — exact floor 186,800');
   const st = n(phone);
   assert.equal(st.offer, FLOOR, 'engine state: offer == floor');
   assert.equal(st.state, 'FLOOR');
   assert.equal(st.concessions, 7, 'seven bounded concessions = exactly start − floor');
-  verdict('N2/N3 floor + range', 'exact start→floor ladder, 186,499 hard stop, 1 step/turn', 'asserted', 'the engine owns the numeric path end-to-end; the floor is a hard constraint; minimum necessary concession (1% steps, owner-tunable)', 'multi-instance; that the owner will hold the floor in practice (it is the only authority)');
+  verdict('N2/N3 floor + range', 'exact start→floor ladder, 186,800 hard stop, 1 step/turn', 'asserted', 'the engine owns the numeric path end-to-end; the floor is a hard constraint; minimum necessary concession (1% steps, owner-tunable)', 'multi-instance; that the owner will hold the floor in practice (it is the only authority)');
 });
 
 test('N4. malformed floor → NO concession, honest staff path, no new numbers', async () => {
@@ -312,7 +312,7 @@ test('N11. repeated bargaining → strictly decreasing, one step each, stops at 
   for (let i = 1; i < offers.length - 1; i++) assert.equal(offers[i], offers[i - 1] - STEP, 'monotone −1 step');
   assert.ok(offers[offers.length - 1] < offers[offers.length - 2], 'final step descends');
   assert.equal(offers[offers.length - 1], FLOOR, 'final step clamps exactly to the floor');
-  assert.deepEqual(offers, [198000, 196000, 194000, 192000, 190000, 188000, 186499]);
+  assert.deepEqual(offers, [198000, 196000, 194000, 192000, 190000, 188000, 186800]);
   verdict('N11 monotone ladder', 'deterministic 1%-step descent to the floor', 'asserted', 'no oscillation, no jumps, no below-floor (validator-level determinism)', 'that every step was "motivated" in the psychological sense (context gates exist: value-first / explicit request / bid)');
 });
 
@@ -330,7 +330,7 @@ test('N13. explicit bid far below → bounded counter, never a jump to the floor
   const r = await sendFlow(phone, 'reno16 190000 mein le raha hoon');
   const t = textOf(r);
   assert.ok(t.includes('Rs. 198,000'), 'counter at one step (198,000) — not 190,000, not the floor');
-  assert.ok(!t.includes('190,000') && !t.includes('186,499'), 'neither the low bid nor the floor volunteered');
+  assert.ok(!t.includes('190,000') && !t.includes('186,800'), 'neither the low bid nor the floor volunteered');
   assert.equal(nums(t).length, 1, 'one number only');
   verdict('N13 far-bid counter', 'bounded counter toward the customer, max price preserved', 'asserted', 'the engine concedes minimally per turn toward a stated bid (highest realistic close)', 'that the customer will follow to the floor (they may walk — tracked as outcome)');
 });
@@ -345,7 +345,7 @@ test('N14. below-floor request from the start → bounded counter (never 180,000
   assert.ok(textOf(r2).includes('Rs. 196,000'), 'second bounded counter');
   const all = nums(t1 + ' ' + textOf(r2));
   assert.ok(all.every((x) => x >= FLOOR), 'every quoted number ≥ floor');
-  verdict('N14 below-floor request', 'below-floor numbers are refused; bounded descent only', 'asserted', '"never below 186,499" holds even under direct below-floor pressure', 'floor behavior under a 3rd+ push (covered by the escalation test N26)');
+  verdict('N14 below-floor request', 'below-floor numbers are refused; bounded descent only', 'asserted', '"never below 186,800" holds even under direct below-floor pressure', 'floor behavior under a 3rd+ push (covered by the escalation test N26)');
 });
 
 test('N15. customer walks away → LOST, no-sale outcome recorded, no numbers', async () => {
@@ -501,7 +501,7 @@ test('N25. successful strategy becomes higher priority (learned re-ranking of va
 test('N26. CAP-008: below-floor push at the floor (2×) → human escalation, then silence', async () => {
   const phone = P();
   await sendFlow(phone, 'reno16 zyada hai');
-  for (let i = 0; i < 7; i++) await sendFlow(phone, 'kam karo'); // → floor 186,499
+  for (let i = 0; i < 7; i++) await sendFlow(phone, 'kam karo'); // → floor 186,800
   await sendFlow(phone, '180 k karo'); // push 1 → floor line
   const before = toPhone(phone).length;
   const r = await sendFlow(phone, '180 k karo'); // push 2 → escalate (ack delivered inside escalate)
@@ -524,14 +524,14 @@ test('N26. CAP-008: below-floor push at the floor (2×) → human escalation, th
 test('N27. learning cannot change the floor / rules file (authority is read-only)', async () => {
   const h0 = hash(RULES_FILE);
   for (let i = 0; i < 10; i++) {
-    recordNegotiation({ phone: 'safety-seed', product: 'reno16', outcome: i % 2 ? 'sale' : 'no_sale', start: 200000, final_offer: 186499, discount_amount: 13501, concessions: 7, skills: ['SK-03', 'SK-09', 'SK-10'], objections: ['price'], verification: 'customer_statement' });
+    recordNegotiation({ phone: 'safety-seed', product: 'reno16', outcome: i % 2 ? 'sale' : 'no_sale', start: 200000, final_offer: 186800, discount_amount: 13200, concessions: 7, skills: ['SK-03', 'SK-09', 'SK-10'], objections: ['price'], verification: 'customer_statement' });
   }
   assert.equal(hash(RULES_FILE), h0, 'rules file byte-identical after 10 outcomes');
   const phone = P();
   await sendFlow(phone, 'reno16 zyada hai');
   for (let i = 0; i < 7; i++) await sendFlow(phone, 'kam karo');
   const r = await sendFlow(phone, 'aur kam karo');
-  assert.ok(textOf(r).includes('Rs. 186,499'), 'floor still exactly 186,499');
+  assert.ok(textOf(r).includes('Rs. 186,800'), 'floor still exactly 186,800');
   assert.equal(n(phone).offer, FLOOR);
   assert.equal(neg.concessionStep(200000), STEP, 'step policy unchanged');
   verdict('N27 authority immutability', '10 recorded outcomes → floor, step, rules file all unchanged', 'asserted', 'learning can NEVER move the financial boundary (structural: no write path)', 'owner-initiated rule changes (their edit + the normal git history)');
