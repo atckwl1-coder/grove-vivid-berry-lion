@@ -54,11 +54,14 @@ const C = {
     // 500-char message-recording boundary — no new message-length policy.
     maxCharsForModel: num('HP_MAX_CHARS_FOR_MODEL', 500),
   }),
-  // Typing/composing presence (§7): a UX feature only. The current Meta Cloud
-  // API adapter exposes NO reliable typing-presence API, so production runs
-  // with a no-op adapter. The composer's typing-adapter interface is ready;
-  // enabling this flag without an available adapter is a no-op + boot note.
-  typing: Object.freeze({ enabled: bool('HP_TYPING_ENABLED', false) }),
+  // Typing/composing presence (§7): a UX feature only. The Meta Cloud API
+  // exposes a supported typing indicator on the adapter's existing messages
+  // endpoint (status:read + typing_indicator; verified against the actual
+  // session technology 2026-09-11 — VR-2026-09-11-02). The platform
+  // auto-dismisses it on response or after 25s (no explicit stop exists).
+  // In DEMO mode the adapter is network-isolated (isLive guard), so enabling
+  // it is always safe; set HP_TYPING_ENABLED=false to disable in production.
+  typing: Object.freeze({ enabled: bool('HP_TYPING_ENABLED', true) }),
   // Conversation circuit breaker (§14) — bounded loop/burst protection.
   // Turn = one successfully dispatched autonomous brain reply. Thresholds are
   // objective runtime anomalies (volume, duplicate cycles, failed dispatch) —

@@ -66,7 +66,7 @@ export async function handleIncomingMessage(msg, profileName) {
     if (!text2) {
       return wa.sendText(from, 'Maaf kijiye, voice note samajh nahi aayi. Thora sa type kar dein ya dobara bhejein? 🎤');
     }
-    await thinkAndReply(from, text2, customer, true);
+    await thinkAndReply(from, text2, customer, true, msg.id);
     noteFollowUpAfterBrain(from); // V1-4: follow-up lifecycle bookkeeping (deterministic)
     return;
   }
@@ -86,7 +86,7 @@ export async function handleIncomingMessage(msg, profileName) {
   if (handled) return;
 
   // ── 4. AI Brain ──
-  const aiReply = await thinkAndReply(from, text, customer, false);
+  const aiReply = await thinkAndReply(from, text, customer, false, msg.id);
   noteFollowUpAfterBrain(from); // V1-4: follow-up lifecycle bookkeeping (deterministic)
   return aiReply;
 }
@@ -98,7 +98,7 @@ function intentToReason(intent) {
 }
 
 // ── AI se soch kar jawab dena ──
-async function thinkAndReply(from, text, customer, wasVoice) {
+async function thinkAndReply(from, text, customer, wasVoice, inboundMsgId) {
   const ai = await think(text, customer);
 
   if (ai.handoff) {
@@ -134,7 +134,13 @@ async function thinkAndReply(from, text, customer, wasVoice) {
   // adapter). Stale / human-taken-over / DND / kill-switch / session-lost
   // compositions are CANCELLED — never sent. The recipient receives ONE
   // complete message; per-character sending does not exist in this design.
-  return pacedBrainSend(from, text, ai.reply, ai.evidence ? { source: 'AI', evidence: ai.evidence } : undefined);
+  //
+  // Typing presence (VR-2026-09-11-02): the Meta Cloud API supports a typing
+  // indicator on the SAME messages endpoint (status:read + typing_indicator,
+  // targeting the triggering inbound's conversation). The composer starts it
+  // at composition begin; the platform auto-dismisses it on our response or
+  // after 25s — there is no explicit stop call, and none is invented.
+  return pacedBrainSend(from, text, ai.reply, ai.evidence ? { source: 'AI', evidence: ai.evidence } : undefined, { inboundMessageId: inboundMsgId });
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -144,14 +150,25 @@ async function thinkAndReply(from, text, customer, wasVoice) {
 //  firewall/outbox logic is duplicated; the composer receives only
 //  already-validated response text (§17).
 // ─────────────────────────────────────────────────────────────
-// Typing/composing presence (§7): a UX feature only. The current Meta Cloud
-// API adapter exposes NO reliable typing-presence API, so production runs
-// with a no-op adapter (null). The composer's typing-adapter interface is
-// ready for a future adapter; absence never blocks composing or delivery.
-const PRODUCTION_TYPING_ADAPTER = null; // e.g. { start(convId){}, stop(convId){} } when one exists
-if (HUMAN_PACED_CONFIG.typing.enabled && !PRODUCTION_TYPING_ADAPTER) {
-  log.warn('human-paced: typing presence enabled in config but no adapter available — operating without it (UX only, never blocks)');
-}
+// Typing/composing presence (§7): a UX feature only. PRODUCTION ADAPTER
+// (VR-2026-09-11-02, verified against the actual session technology): the
+// Meta Cloud API exposes a supported typing indicator — same messages
+// endpoint, same token, targeting the triggering inbound's 1-to-1
+// conversation via message_id. Semantics: shown while we prepare a response,
+// auto-dismissed by the platform on our response or after 25 seconds
+// (whichever first) — NO explicit stop endpoint exists; stop() below is a
+// documented no-op, never a loop. Best-effort & non-blocking: a failure is
+// swallowed (no retry, no gate on composing/delivery). CAP-055: no presence
+// signal while STOPPED. DEMO mode: no network (isLive guard).
+const PRODUCTION_TYPING_ADAPTER = {
+  start(convId, ctx) {
+    if (killswitch.isStopped()) return; // CAP-055 discipline
+    const messageId = ctx?.inboundMessageId;
+    if (!messageId) return;
+    wa.startTypingPresence(convId, messageId).catch(() => { /* UX only — never blocks, never retries */ });
+  },
+  stop() { /* platform auto-dismiss: on response or after 25s — nothing to call */ },
+};
 
 const composer = createComposer({
   clock: realClock,
@@ -182,7 +199,7 @@ function makeGuard(from, expectedVersion) {
   };
 }
 
-export async function pacedBrainSend(from, inboundText, replyText, meta = { source: 'AI' }) {
+export async function pacedBrainSend(from, inboundText, replyText, meta = { source: 'AI' }, options = {}) {
   // 1) Conversation circuit breaker (§14) — pathological autonomous loops
   //    stop here and are surfaced to staff via the EXISTING CAP-008
   //    escalation path (POLICY_LIMIT). Not reached while human-owned
@@ -213,6 +230,7 @@ export async function pacedBrainSend(from, inboundText, replyText, meta = { sour
     text: replyText,
     version,
     token,
+    typingContext: { inboundMessageId: options.inboundMessageId },
   });
   const guard = makeGuard(from, version);
 

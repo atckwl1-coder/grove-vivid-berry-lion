@@ -85,10 +85,16 @@ export function computeIntervals(text, cfg = HUMAN_PACED_CONFIG, rng = Math.rand
 export function createComposer({ clock = realClock, rng = Math.random, typing = null, audit = () => {}, config = HUMAN_PACED_CONFIG } = {}) {
   const active = new Map(); // convId → record  (single-flight)
 
-  function typingStart(convId) {
-    if (typing?.start) { try { typing.start(convId); audit('typing_started', { convId }); } catch { /* UX only — never breaks composing */ } }
+  function typingStart(convId, ctx) {
+    // Best-effort, non-blocking: a throwing adapter is swallowed — typing is
+    // UX only and must never break composing, never be retried, and never
+    // gate the outbound path.
+    if (typing?.start) { try { typing.start(convId, ctx); audit('typing_started', { convId }); } catch { /* UX only — never breaks composing */ } }
   }
   function typingStop(convId) {
+    // Best-effort (no retry loop, non-blocking). For the Meta Cloud API
+    // adapter this is a documented no-op: the platform auto-dismisses the
+    // indicator on response or after 25 seconds (no explicit stop exists).
     if (typing?.stop) { try { typing.stop(convId); audit('typing_stopped', { convId }); } catch { /* UX only */ } }
   }
   function finishComplete(rec, totalMs) {
@@ -108,16 +114,16 @@ export function createComposer({ clock = realClock, rng = Math.random, typing = 
      * conversation: if one is in flight, it is superseded (its token is
      * cancelled; the loop observes this at its next checkpoint).
      */
-    begin({ convId, jobId, text, version, token }) {
+    begin({ convId, jobId, text, version, token, typingContext }) {
       const prev = active.get(convId);
       if (prev && prev.token !== token) {
         prev.token.cancel('superseded');
         audit('composition_superseded', { convId, job: jobId, supersedes: prev.jobId });
       }
-      const rec = { convId, jobId, text: String(text ?? ''), version, token, startedAt: Date.now() };
+      const rec = { convId, jobId, text: String(text ?? ''), version, token, typingContext, startedAt: Date.now() };
       active.set(convId, rec);
       audit('composition_started', { convId, job: jobId, chars: rec.text.length });
-      typingStart(convId);
+      typingStart(convId, rec.typingContext);
       return rec;
     },
 
