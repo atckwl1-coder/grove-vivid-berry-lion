@@ -154,3 +154,35 @@ export const markRead = (messageId) => {
     .post(apiUrl(), { messaging_product: 'whatsapp', status: 'read', message_id: messageId }, { headers: headers() })
     .catch(() => {});
 };
+
+// ── Typing indicator (Meta Cloud API — SUPPORTED capability, official docs
+//    "Typing indicators" updated 2026-06-17; verified against the actual
+//    session technology 2026-09-11 — VR-2026-09-11-02) ──
+// Rides the SAME messages endpoint the adapter already uses (same token,
+// same phone number ID): status:read + typing_indicator. It targets the
+// 1-to-1 conversation of the triggering inbound message (message_id from the
+// messages webhook). Platform semantics: the indicator is dismissed when a
+// response is sent OR after 25 seconds (whichever comes first) — there is NO
+// explicit stop call, and none is invented. Same documented class as
+// markRead: a low-risk, Meta-idempotent presence side effect — no content,
+// no recipient parameter — inline, best-effort, not outboxed, and never
+// blocking or bypassing the message send path (firewall → outbox unchanged).
+export const typingIndicatorPayload = (messageId) => ({
+  messaging_product: 'whatsapp',
+  status: 'read',
+  message_id: messageId,
+  typing_indicator: { type: 'text' },
+});
+
+export async function startTypingPresence(_phone, inboundMessageId) {
+  if (!isLive() || !inboundMessageId) return null; // DEMO: no network, ever
+  try {
+    const { data } = await axios.post(apiUrl(), typingIndicatorPayload(inboundMessageId), { headers: headers(), timeout: 15000 });
+    return data;
+  } catch (err) {
+    // Same token as message delivery: a credential rejection is the same
+    // fatal session condition (fail-closed for autonomous composing).
+    if (classifyProviderError(err).fatal) markSessionUnavailable(`meta_typing_auth_rejected_${err.response.status}`);
+    throw err;
+  }
+}

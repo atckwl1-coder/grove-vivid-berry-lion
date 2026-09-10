@@ -322,10 +322,22 @@ test('HP6. typing presence: adapter started once + stopped once (complete and ca
   assert.equal(r.ok, false);
   assert.equal(r.reason, 'drill');
   assert.deepEqual(events, [['start', 't1'], ['stop', 't1'], ['start', 't2'], ['stop', 't2']], 'cancel: start once, stop once — no double stop');
-  // production composer (this process): typing disabled → zero typing events, composing unaffected
-  assert.equal(auditFind('typing_started').length, 0, 'production runs the no-op adapter (Meta Cloud API has no reliable typing API)');
-  assert.equal(auditFind('typing_stopped').length, 0);
-  verdict('HP6 typing lifecycle', 'adapter interface works; start/stop once per path; production no-op', `events=${events.length}`, 'typing is a pluggable UX adapter — its absence never blocks composing or delivery (§7)', 'an actual Meta typing-presence API (none exists for this integration)');
+  // production composer (this process): the REAL adapter is wired (Meta Cloud
+  // API typing indicator — VR-2026-09-11-02). DEMO mode is network-isolated
+  // (isLive guard → zero Meta calls), but the lifecycle audits still fire for
+  // the brain compositions earlier tests sent.
+  assert.ok(auditFind('typing_started').length >= 2, 'production typing lifecycle audited (HP1/HP2 brain replies started typing)');
+  assert.ok(auditFind('typing_stopped').length >= 2, 'production typing stopped on completion (audited)');
+  // DEMO isolation: the typing request never touches the network
+  assert.equal(await wa.startTypingPresence('923009999999', 'wamid.demo.isolation'), null, 'DEMO: typing request is network-isolated (isLive guard)');
+  // payload = the documented supported shape exactly (official docs, updated 2026-06-17)
+  assert.deepEqual(wa.typingIndicatorPayload('wamid.shape'), {
+    messaging_product: 'whatsapp',
+    status: 'read',
+    message_id: 'wamid.shape',
+    typing_indicator: { type: 'text' },
+  }, 'typing payload matches the documented supported shape');
+  verdict('HP6 typing lifecycle', 'adapter interface works; start/stop once per path; production adapter wired + DEMO network-isolated', `events=${events.length}`, 'typing is a pluggable UX adapter; a real supported capability now exists in the session technology (Meta Cloud API typing indicator) and absence/failure never blocks composing or delivery (§7)', 'LIVE Meta acceptance of the indicator (DEMO spy here — not production evidence)');
 });
 
 test('HP7. mid-composition: a NEW customer message supersedes the old composition — one reply total', async () => {
@@ -590,6 +602,157 @@ test('HP19. circuit breaker: duplicate-cycle + dispatch-failure triggers (unit, 
   assert.equal(allowed, 10, 'ten distinct exchanges (e.g. genuine negotiation) never trip the duplicate breaker');
   breakerMod.resetBreaker(ph1); breakerMod.resetBreaker(ph2); breakerMod.resetBreaker(ph3);
   verdict('HP19 breaker (unit)', 'duplicate-cycle + dispatch-failure thresholds configurable & tested; distinct exchanges pass', `allowed=${allowed}/10`, 'thresholds are objective runtime anomalies, configurable without code change (§14)', 'semantic loop detection (deliberately not attempted — objective counters only)');
+});
+
+// ── TYPING PRESENCE INTEGRATION (Meta Cloud API capability, VR-2026-09-11-02)
+// The production composer now carries the REAL typing adapter (network-isolated
+// in DEMO via the isLive guard; live in production against the SAME messages
+// endpoint). These tests prove the lifecycle + safety properties end-to-end.
+// ═══════════════════════════════════════════════════════════════
+test('T1. typing starts one time for a valid composition (and delivery stays ONE complete message)', async () => {
+  const phone = P();
+  const before = auditFind('typing_started', (p) => p.convId === CID(phone)).length;
+  await sendFlow(phone, 'typing probe message');
+  const started = auditFind('typing_started', (p) => p.convId === CID(phone)).length;
+  assert.equal(started - before, 1, 'typing started one time for this composition — no more');
+  assert.equal(aiReplies(phone).length, 1, 'final delivery = ONE complete reply');
+  assert.equal(sentJobsFor(phone).length, 1, 'one outbox job for it');
+  verdict('T1 typing start (production adapter)', '1 composition ⇒ exactly 1 typing start; 1 complete reply', `started=1 replies=1`, '§7 presence starts with the composition, targeting the triggering inbound conversation', 'LIVE Meta acceptance of the indicator (DEMO spy)');
+});
+
+test('T2. typing stops one time on successful completion', async () => {
+  const phone = P();
+  const before = auditFind('typing_stopped', (p) => p.convId === CID(phone)).length;
+  await sendFlow(phone, 'typing stop probe');
+  const stopped = auditFind('typing_stopped', (p) => p.convId === CID(phone)).length;
+  assert.equal(stopped - before, 1, 'typing stopped one time on completion — no more');
+  assert.equal(aiReplies(phone).length, 1, 'reply still delivered one time');
+  verdict('T2 typing stop on completion', 'completion ⇒ exactly 1 typing stop (platform also auto-dismisses on response)', `stopped=1 replies=1`, 'no dangling indicator on the success path', 'the platform-side 25s auto-dismiss timing itself (Meta-timed)');
+});
+
+test('T3. typing stops on cancellation (DND mid-composition)', async () => {
+  const phone = P();
+  const before = auditFind('typing_stopped', (p) => p.convId === CID(phone)).length;
+  const p = brain.pacedBrainSend(phone, 'dnd typing probe', 'DndTypingBodyText', { source: 'AI' }, { inboundMessageId: `wamid.t3-${++seq}` });
+  await waitFor(() => brain._composer.isActive(phone));
+  await sleep(120);
+  await postWebhook(eventBody(textMsg(`wamid.t3dnd-${++seq}`, 'band karo', phone)));
+  const r = await p;
+  assert.equal(r.ok, false, 'composition cancelled by the opt-out');
+  await sleep(150);
+  const stopped = auditFind('typing_stopped', (p2) => p2.convId === CID(phone)).length;
+  assert.equal(stopped - before, 1, 'typing stopped one time on cancellation — no more');
+  assert.equal(toPhone(phone).filter((d) => textOf(d).includes('DndTypingBodyText')).length, 0, 'no send to an opted-out customer');
+  assert.ok(await waitFor(() => toPhone(phone).filter((d) => /Aapko ab koi offer/.test(textOf(d))).length === 1, 2000), 'consent ack only');
+  verdict('T3 typing stop on DND cancel', 'opt-out mid-composition ⇒ typing stopped once, reply never sent', `reason=${r.reason} stopped=1`, 'a terminal cancelled state always releases the presence signal (best-effort, audited)', 'the platform-side auto-dismiss backstop (25s) if the stop call itself ever failed in LIVE');
+});
+
+test('T4. typing stops on human takeover', async () => {
+  const phone = P();
+  const before = auditFind('typing_stopped', (p) => p.convId === CID(phone)).length;
+  const p = brain.pacedBrainSend(phone, 'takeover typing probe', 'TakeoverTypingBodyText', { source: 'AI' }, { inboundMessageId: `wamid.t4-${++seq}` });
+  await waitFor(() => brain._composer.isActive(phone));
+  await sleep(120);
+  await postWebhook(eventBody(textMsg(`wamid.t4tk-${++seq}`, 'menu_staff', phone)));
+  const r = await p;
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, 'human_takeover');
+  await sleep(150);
+  const stopped = auditFind('typing_stopped', (p2) => p2.convId === CID(phone)).length;
+  assert.equal(stopped - before, 1, 'typing stopped one time on takeover — no more');
+  assert.equal(toPhone(phone).filter((d) => textOf(d).includes('TakeoverTypingBodyText')).length, 0, 'no stale AI send');
+  assert.ok(await waitFor(() => toPhone(phone).filter((d) => textOf(d).includes('team tak pahunch')).length === 1, 2000), 'honest CAP-008 ack only');
+  verdict('T4 typing stop on takeover', 'human ownership mid-composition ⇒ typing stopped once; CAP-008 ack only', `reason=${r.reason}`, '§10 takeover releases the presence signal via the same cancellation path', 'staff-side behavior after ownership (their domain)');
+});
+
+test('T5. typing stops on kill switch', async () => {
+  const phone = P();
+  const before = auditFind('typing_stopped', (p) => p.convId === CID(phone)).length;
+  const p = brain.pacedBrainSend(phone, 'kill typing probe', 'KillTypingBodyText', { source: 'AI' }, { inboundMessageId: `wamid.t5-${++seq}` });
+  await waitFor(() => brain._composer.isActive(phone));
+  await sleep(120);
+  kill.stopAll({ staffId: 'boss', role: 'OWNER' }, actId('hp-t5-stop'), 'drill: typing kill stop');
+  let r;
+  try {
+    r = await p;
+  } finally {
+    kill.resumeAll({ staffId: 'boss', role: 'OWNER' }, actId('hp-t5-resume'), 'drill over', 'RESUME');
+  }
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, 'kill_switch');
+  await sleep(150);
+  const stopped = auditFind('typing_stopped', (p2) => p2.convId === CID(phone)).length;
+  assert.equal(stopped - before, 1, 'typing stopped one time on kill — no more');
+  assert.equal(toPhone(phone).filter((d) => textOf(d).includes('KillTypingBodyText')).length, 0, 'zero sends');
+  verdict('T5 typing stop on kill', 'CAP-055 STOP mid-composition ⇒ typing stopped once; zero sends', `reason=${r.reason}`, 'the kill wins at the composition level too; presence cannot outlive an autonomous send', 'a STOP in the microsecond between the final guard and the enqueue (existing two walls)');
+});
+
+test('T6. typing stops when a newer customer message supersedes the response', async () => {
+  const phone = P();
+  const startedBefore = auditFind('typing_started', (p) => p.convId === CID(phone)).length;
+  const stoppedBefore = auditFind('typing_stopped', (p) => p.convId === CID(phone)).length;
+  await postWebhook(eventBody(textMsg(`wamid.t6a-${++seq}`, 'supersede typing probe one', phone)));
+  await sleep(150);
+  await postWebhook(eventBody(textMsg(`wamid.t6b-${++seq}`, 'supersede typing probe two, latest', phone)));
+  assert.ok(await waitFor(() => aiReplies(phone).length >= 1, 4000), 'latest reply arrived');
+  await sleep(400);
+  const started = auditFind('typing_started', (p) => p.convId === CID(phone)).length;
+  const stopped = auditFind('typing_stopped', (p) => p.convId === CID(phone)).length;
+  assert.equal(started - startedBefore, 2, 'typing started for BOTH compositions (old + new)');
+  assert.equal(stopped - stoppedBefore, 2, 'typing stopped for BOTH — the superseded one released its signal');
+  assert.equal(aiReplies(phone).length, 1, 'still ONE reply total (latest wins)');
+  verdict('T6 typing stop on supersede', 'new message ⇒ old composition releases typing; new one starts its own; one reply', `started=2 stopped=2 replies=1`, '§9 single-flight: presence follows the ACTIVE composition only', 'two webhooks in the same microsecond (single-flight + idempotency)');
+});
+
+test('T7. typing failure does not cause an outbound bypass (composition + delivery proceed normally)', async () => {
+  // (a) unit: a throwing typing adapter is swallowed — composing completes and
+  //     the reply dispatches normally; no retry.
+  let startCalls = 0;
+  const failingTyping = {
+    start: () => { startCalls += 1; throw new Error('typing endpoint down'); },
+    stop: () => { throw new Error('stop also down'); },
+  };
+  const cx = composerMod.createComposer({ clock: instantClock, typing: failingTyping, audit: () => {} });
+  const rec = cx.begin({ convId: 'tf1', jobId: 'jtf1', text: 'failure probe reply', version: {}, token: composerMod.createCancelToken() });
+  const r = await cx.compose(rec);
+  assert.equal(r.ok, true, 'typing failure never blocks composition');
+  assert.equal(startCalls, 1, 'exactly one attempt — no retry loop');
+  // (b) e2e (DEMO): the production adapter's request is network-isolated and
+  //     fire-and-forget — it cannot enqueue, bypass, or alter the send path
+  //     (the reply below rode firewall → outbox → one provider call).
+  const phone = P();
+  await sendFlow(phone, 'typing failure e2e probe');
+  assert.equal(aiReplies(phone).length, 1, 'delivery unaffected');
+  const job = sentJobsFor(phone).find((j) => /^reply-\d+$/.test(textOf(j.payload)));
+  assert.equal(job.meta.firewall?.decision, 'ALLOW', 'firewall still decided the job');
+  assert.equal(job.status, 'SENT', 'outbox still carried the job');
+  verdict('T7 typing failure ≠ bypass', 'throwing adapter swallowed; 1 attempt; reply still firewall-ALLOWed + outbox-SENT + 1 delivery', `startCalls=1 decision=ALLOW status=SENT`, 'typing is best-effort UX; it has no path to enqueue or bypass anything (no outbox call in the adapter)', 'a LIVE typing call hanging for 15s while composition proceeds (fire-and-forget by design; no gate either way)');
+});
+
+test('T8. typing failure does not create a retry loop (no timers anywhere in the layer or the adapter)', async () => {
+  // (a) mechanically: no retry/reconnect timers in any new module or in brain.js
+  //     (the production adapter is a single fire-and-forget call with .catch)
+  for (const f of ['config.js', 'composer.js', 'breaker.js', 'sessionHealth.js', 'version.js']) {
+    const s = fs.readFileSync(path.join(REPO, 'src/services/humanPaced', f), 'utf8');
+    assert.equal(/setInterval\s*\(/.test(s), false, `${f}: no retry/reconnect timer`);
+  }
+  const brainSrc = fs.readFileSync(path.join(REPO, 'src/services/brain.js'), 'utf8');
+  assert.equal(/setInterval\s*\(/.test(brainSrc), false, 'brain.js (incl. the production typing adapter): no retry/reconnect timer');
+  assert.ok(brainSrc.includes('.catch(() => { /* UX only'), 'adapter failure path is a single swallow, not a loop');
+  // (b) the composer invokes the adapter at most once per composition — even
+  //     on the cancel path (start once, stop once; T7 counted both)
+  const calls = { start: 0, stop: 0 };
+  const cx = composerMod.createComposer({
+    clock: instantClock,
+    typing: { start: () => { calls.start += 1; }, stop: () => { calls.stop += 1; } },
+    audit: () => {},
+  });
+  const tok = composerMod.createCancelToken();
+  const rec = cx.begin({ convId: 'tl1', jobId: 'jtl1', text: 'loop probe', version: {}, token: tok });
+  tok.cancel('stop-it');
+  await cx.compose(rec);
+  assert.deepEqual(calls, { start: 1, stop: 1 }, 'one start + one stop per composition, cancel included — nothing to loop');
+  verdict('T8 no retry loop', 'zero timers in the layer/adapter; adapter invoked one time per path — no retries', `calls=${JSON.stringify(calls)}`, 'a failed typing state can never escalate into a retry/reconnect loop', 'Meta-side rate-limit backoff on the indicator endpoint (platform-enforced, outside this process)');
 });
 
 // ── RACE TESTS (the five mandated boundary cases) ──────────────
