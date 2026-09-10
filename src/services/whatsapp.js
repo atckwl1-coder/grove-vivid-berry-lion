@@ -4,6 +4,7 @@
 // ─────────────────────────────────────────────────────────────
 import axios from 'axios';
 import { config, isLive } from '../config.js';
+import { markSessionUnavailable } from './humanPaced/sessionHealth.js';
 import { log } from '../utils/logger.js';
 import { redact } from '../sentinel/audit.js';
 import * as firewall from '../sentinel/firewall.js'; // P2: static wiring — no config can disable the boundary
@@ -21,9 +22,27 @@ export function initOutbox(instance) {
 }
 
 // Real provider call — SIRF outbox worker use karta hai (LIVE mode)
+//
+// Human-Paced Safety Layer (§15): a CREDENTIAL rejection (401/403) is a fatal
+// session condition → mark the session unavailable (autonomous composing then
+// fails closed at its dispatch boundary until the operator re-authenticates).
+// Transient errors (5xx/429/network/timeout) are NOT fatal — the EXISTING
+// bounded outbox retry policy handles them unchanged. No new retry/reconnect
+// logic is introduced here (this adapter is stateless per send).
+export function classifyProviderError(err) {
+  const status = err?.response?.status ?? null;
+  const fatal = status === 401 || status === 403;
+  return { fatal, status };
+}
+
 export async function deliverToMeta(payload) {
-  const { data } = await axios.post(apiUrl(), payload, { headers: headers(), timeout: 15000 });
-  return data;
+  try {
+    const { data } = await axios.post(apiUrl(), payload, { headers: headers(), timeout: 15000 });
+    return data;
+  } catch (err) {
+    if (classifyProviderError(err).fatal) markSessionUnavailable(`meta_auth_rejected_${err.response.status}`);
+    throw err;
+  }
 }
 
 // Demo provider — console print RE-DACTED (PII boundary, 2A.1).

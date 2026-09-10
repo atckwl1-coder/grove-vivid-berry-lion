@@ -5,6 +5,7 @@
 //  customer ko kabhi error nahi dikhta.
 // ─────────────────────────────────────────────────────────────
 import axios from 'axios';
+import crypto from 'crypto';
 import { config } from '../config.js';
 import * as wa from './whatsapp.js';
 import { routeFlow } from '../flows/router.js';
@@ -14,6 +15,13 @@ import { transcribeVoiceNote, analyzePhonePhoto } from './media.js';
 import { noteFollowUpAfterBrain } from './followups.js';
 import { log } from '../utils/logger.js';
 import * as conversations from '../sentinel/conversations.js';
+import * as killswitch from '../sentinel/killswitch.js';
+import { audit } from '../sentinel/audit.js';
+import { HUMAN_PACED_CONFIG } from './humanPaced/config.js';
+import { createComposer, createCancelToken, realClock } from './humanPaced/composer.js';
+import { conversationVersion, sameVersion } from './humanPaced/version.js';
+import { isSessionAvailable } from './humanPaced/sessionHealth.js';
+import * as breaker from './humanPaced/breaker.js';
 
 // V1-1 (2026-09-09): model-context bound — last 12 eligible entries for this
 // customer (≈6 turns); each entry ≤ 500 chars (existing log truncation) →
@@ -117,7 +125,135 @@ async function thinkAndReply(from, text, customer, wasVoice) {
   // existing P2 EVIDENCE stage (meta.evidence — verified only; absent ⇒ class
   // rules govern, per firewall stage 3). LLM replies carry no evidence
   // (their text is untrusted output, gated as AI text as before).
-  return wa.sendText(from, ai.reply, ai.evidence ? { source: 'AI', evidence: ai.evidence } : undefined);
+  //
+  // HUMAN-PACED RESPONSE & CONVERSATION SAFETY LAYER (2026-09-11):
+  // The COMPLETE reply is already generated + validated above. It is now
+  // composed with human-like pacing (bounded, configurable), re-validated
+  // against the conversation version at every checkpoint, and dispatched
+  // through the ONE existing outbound path (P2 firewall → durable outbox →
+  // adapter). Stale / human-taken-over / DND / kill-switch / session-lost
+  // compositions are CANCELLED — never sent. The recipient receives ONE
+  // complete message; per-character sending does not exist in this design.
+  return pacedBrainSend(from, text, ai.reply, ai.evidence ? { source: 'AI', evidence: ai.evidence } : undefined);
+}
+
+// ─────────────────────────────────────────────────────────────
+//  pacedBrainSend — the single pace-able call site (brain path only).
+//  Negotiation-engine (V1-3) and follow-up (V1-4) sends stay on their own
+//  paths — unchanged. No provider calls are made here directly; no
+//  firewall/outbox logic is duplicated; the composer receives only
+//  already-validated response text (§17).
+// ─────────────────────────────────────────────────────────────
+// Typing/composing presence (§7): a UX feature only. The current Meta Cloud
+// API adapter exposes NO reliable typing-presence API, so production runs
+// with a no-op adapter (null). The composer's typing-adapter interface is
+// ready for a future adapter; absence never blocks composing or delivery.
+const PRODUCTION_TYPING_ADAPTER = null; // e.g. { start(convId){}, stop(convId){} } when one exists
+if (HUMAN_PACED_CONFIG.typing.enabled && !PRODUCTION_TYPING_ADAPTER) {
+  log.warn('human-paced: typing presence enabled in config but no adapter available — operating without it (UX only, never blocks)');
+}
+
+const composer = createComposer({
+  clock: realClock,
+  typing: HUMAN_PACED_CONFIG.typing.enabled ? PRODUCTION_TYPING_ADAPTER : null,
+  audit,
+  config: HUMAN_PACED_CONFIG,
+});
+
+// Test seam (documented): expose the composer instance for focused tests.
+export const _composer = composer;
+
+const REASON_EVENT = {
+  stale: 'stale_response_discarded',
+  human_takeover: 'human_takeover_during_composition',
+  kill_switch: 'kill_switch_cancelled_composition',
+  session_unavailable: 'session_unavailable_during_composition',
+};
+
+const sha1 = (s) => crypto.createHash('sha1').update(String(s ?? '')).digest('hex');
+
+function makeGuard(from, expectedVersion) {
+  return () => {
+    if (!isSessionAvailable()) return { ok: false, reason: 'session_unavailable' };
+    if (killswitch.isStopped()) return { ok: false, reason: 'kill_switch' };
+    if (conversations.isSuppressed(from)) return { ok: false, reason: 'human_takeover' };
+    if (!sameVersion(conversationVersion(from), expectedVersion)) return { ok: false, reason: 'stale' };
+    return { ok: true };
+  };
+}
+
+export async function pacedBrainSend(from, inboundText, replyText, meta = { source: 'AI' }) {
+  // 1) Conversation circuit breaker (§14) — pathological autonomous loops
+  //    stop here and are surfaced to staff via the EXISTING CAP-008
+  //    escalation path (POLICY_LIMIT). Not reached while human-owned
+  //    (CAP-008 wall 1 suppresses the brain), so a stored HUMAN_REVIEW
+  //    reaching here clears — no permanent customer blocking in this layer.
+  const b = breaker.beforeReply(from, { inboundHash: sha1(inboundText), replyHash: sha1(replyText), audit });
+  if (!b.allowed) {
+    if (b.newly) {
+      try {
+        await conversations.escalate(from, 'POLICY_LIMIT', {
+          aiInference: { intent: 'general', source: 'conversation-circuit-breaker' },
+        });
+      } catch (e) {
+        audit('BREAKER_ESCALATION_FAILED', { convId: from, error: String(e?.message || e).slice(0, 120) });
+      }
+    }
+    return { ok: false, reason: 'breaker' };
+  }
+
+  // 2) Version capture + single-flight composition. A new composition
+  //    supersedes any in-flight one for this conversation (§9: one active
+  //    autonomous composition per conversation — no races).
+  const version = conversationVersion(from);
+  const token = createCancelToken();
+  const rec = composer.begin({
+    convId: from,
+    jobId: `hp-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`,
+    text: replyText,
+    version,
+    token,
+  });
+  const guard = makeGuard(from, version);
+
+  // 3) Timed, cancellable composition: per-character bounded intervals,
+  //    total capped; state guard at every checkpoint + on completion (§8).
+  const r = await composer.compose(rec, { guard });
+  if (!r.ok) {
+    const ev = REASON_EVENT[r.reason];
+    if (ev) audit(ev, { convId: from, job: rec.jobId, reason: r.reason });
+    return { ok: false, reason: r.reason };
+  }
+
+  // 4) Pre-dispatch re-validation — the final race wall before the send
+  //    boundary (between "composition done" and "send enqueued").
+  const g = guard();
+  if (!g.ok) {
+    composer.end(from, rec, { cancel: true, reason: g.reason });
+    const ev = REASON_EVENT[g.reason];
+    if (ev) audit(ev, { convId: from, job: rec.jobId, reason: g.reason });
+    return { ok: false, reason: g.reason };
+  }
+
+  // 5) THE ONE existing outbound path (firewall → durable outbox → adapter).
+  try {
+    const job = await wa.sendText(from, replyText, meta);
+    composer.end(from, rec);
+    breaker.recordTurn(from);
+    breaker.recordDispatchOk(from);
+    audit('final_send_dispatched', { convId: from, job: rec.jobId, outboxJob: job.id });
+    return { ok: true, outboxJob: job.id };
+  } catch (e) {
+    composer.end(from, rec);
+    const stopped = breaker.recordDispatchFailure(from, { audit });
+    audit('composition_send_failed', {
+      convId: from,
+      job: rec.jobId,
+      code: e?.code || 'SEND_FAILED',
+      breakerToHumanReview: stopped === 'HUMAN_REVIEW',
+    });
+    return { ok: false, reason: e?.code || 'SEND_FAILED' };
+  }
 }
 
 // ── LLM call (locked to store data — AI apni marzi se price NAHI bana sakta) ──
