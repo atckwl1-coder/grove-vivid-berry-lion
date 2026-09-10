@@ -6,7 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import { config } from '../config.js';
 
-let db = { customers: {}, messages: [], reservations: [], campaigns: [] };
+let db = { customers: {}, messages: [], reservations: [], campaigns: [], negotiations: [] };
 
 export function loadDb() {
   try {
@@ -111,6 +111,19 @@ export function setConsent(phone, value, source) {
   db.campaigns.push({ type: 'consent', phone, value, source, at: new Date().toISOString() });
   save();
 }
+
+// ── V1-3 (2026-09-10): negotiation outcome records — LEARNING DATA (tactics
+// only). Captured ONLY from deterministic engine events (never LLM statements):
+//   verification = 'customer_statement' — this deployment has NO payment
+//   system, so a "sale" is the customer's stated acceptance of an approved
+//   price, never a verified payment. Never fabricated; never backfilled.
+export function recordNegotiation(rec) {
+  db.negotiations = Array.isArray(db.negotiations) ? db.negotiations : [];
+  db.negotiations.push({ ...rec, at: new Date().toISOString() });
+  if (db.negotiations.length > 1000) db.negotiations = db.negotiations.slice(-800);
+  save();
+}
+export const negotiationOutcomes = () => (Array.isArray(db.negotiations) ? db.negotiations : []);
 
 export const allCustomers = () => Object.values(db.customers);
 export const today = () => new Date().toISOString().slice(0, 10);

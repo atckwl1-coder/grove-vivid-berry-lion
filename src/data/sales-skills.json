@@ -1,0 +1,383 @@
+{
+  "note": "V1-3 adaptive sales skill library (CAP-039). Metadata is operational, NOT financial authority: no skill may grant a concession, state a floor, or change any business term — numeric authority lives in negotiation-rules.json + products.json only. authority_gated skills (controlled concession, floor protection) are NEVER selected by the ranking/learning logic; they fire only on the engine's structural gates. performance is computed at runtime from captured outcome records (db.negotiations); the stored zeros mean 'no observations yet' — never fake metrics. The learning system may re-rank VALUE skills only (tactics), never the gated ones (authority).",
+  "version": 1,
+  "skills": [
+    {
+      "skill_id": "SK-01",
+      "skill_name": "Rapport / Trust Building",
+      "purpose": "Establish trust so the customer stays in the conversation and feels heard.",
+      "when_to_use": "Trust concern; early conversation; after any friction.",
+      "when_not_to_use": "Customer is ready to buy (do not delay the close).",
+      "prerequisites": [],
+      "preferred_signals": [
+        "trust"
+      ],
+      "expected_outcome": "Customer continues the conversation with the store, not walking away.",
+      "compatible_followups": [
+        "SK-02",
+        "SK-03",
+        "SK-10"
+      ],
+      "prohibited_situations": [
+        "fabricated guarantees",
+        "fake approval",
+        "fake scarcity"
+      ],
+      "performance": {
+        "uses": 0,
+        "wins": 0,
+        "losses": 0
+      },
+      "version": 1,
+      "status": "approved",
+      "line": "Ji, aapki baat dhyan se sun raha hoon. Humara kaam hai ke aapko bilkul clear picture dein — kya mil raha hai, kya included hai. {benefits}",
+      "priority": {
+        "trust": 2
+      }
+    },
+    {
+      "skill_id": "SK-02",
+      "skill_name": "Objection Discovery",
+      "purpose": "Understand WHAT the objection actually is (price? competitor? budget? trust?) before responding.",
+      "when_to_use": "First objection of any kind; unclear motive.",
+      "when_not_to_use": "Customer already stated a specific price to pay at.",
+      "prerequisites": [],
+      "preferred_signals": [
+        "price"
+      ],
+      "expected_outcome": "Objection isolated; response targets the real concern.",
+      "compatible_followups": [
+        "SK-03",
+        "SK-07",
+        "SK-08",
+        "SK-05",
+        "SK-10"
+      ],
+      "prohibited_situations": [
+        "inventing customer motives",
+        "ignoring a stated budget"
+      ],
+      "performance": {
+        "uses": 0,
+        "wins": 0,
+        "losses": 0
+      },
+      "version": 1,
+      "status": "approved",
+      "line": "Ji, price important hai — main bilkul samajhta hoon. Pehle ye dekhiye ke is mein kya included hai: {benefits}. Phir aap bataiye — kis cheez par discuss karna hai?",
+      "priority": {
+        "price": 2
+      }
+    },
+    {
+      "skill_id": "SK-03",
+      "skill_name": "Value Anchoring",
+      "purpose": "Anchor the price against the approved value stack BEFORE any price movement (sell value before reducing price).",
+      "when_to_use": "Price objection; competitor pressure; budget pressure with approved benefits available.",
+      "when_not_to_use": "No approved benefits exist for the product (never invent value); customer already ready to buy.",
+      "prerequisites": [],
+      "preferred_signals": [
+        "price",
+        "competitor",
+        "budget"
+      ],
+      "expected_outcome": "Customer re-weights price vs included value; concession becomes unnecessary or smaller.",
+      "compatible_followups": [
+        "SK-10",
+        "SK-04",
+        "SK-05"
+      ],
+      "prohibited_situations": [
+        "claiming benefits not in the approved list",
+        "comparing to invented competitor prices"
+      ],
+      "performance": {
+        "uses": 0,
+        "wins": 0,
+        "losses": 0
+      },
+      "version": 1,
+      "status": "approved",
+      "line": "Ji dekhien — *{offer}* mein sirf phone nahi, yeh sab included hai: {benefits}. Ye value alag-alag jagah lein to is se zyada lagti hai.",
+      "priority": {
+        "price": 2,
+        "competitor": 2,
+        "budget": 2
+      }
+    },
+    {
+      "skill_id": "SK-04",
+      "skill_name": "Premium Experience Framing",
+      "purpose": "Frame the purchase as a complete premium experience (unboxing, support, services), not just hardware.",
+      "when_to_use": "Feature/value interest; premium models; hesitancy after specs discussed.",
+      "when_not_to_use": "Budget-only objection with no approved premium content for the product.",
+      "prerequisites": [],
+      "preferred_signals": [
+        "feature",
+        "price"
+      ],
+      "expected_outcome": "Customer evaluates total experience, not hardware price alone.",
+      "compatible_followups": [
+        "SK-03",
+        "SK-10"
+      ],
+      "prohibited_situations": [
+        "fabricated services",
+        "invented premium claims"
+      ],
+      "performance": {
+        "uses": 0,
+        "wins": 0,
+        "losses": 0
+      },
+      "version": 1,
+      "status": "approved",
+      "line": "Ji, {name} ek complete premium experience hai — unboxing se le kar support tak. {benefits}",
+      "priority": {
+        "feature": 2,
+        "price": 1
+      }
+    },
+    {
+      "skill_id": "SK-05",
+      "skill_name": "Warranty / Protection Value",
+      "purpose": "Use the approved warranty/protection stack to neutralize risk concerns and defend price.",
+      "when_to_use": "Trust concern; quality doubt; risk-averse customer.",
+      "when_not_to_use": "No approved warranty/protection benefits for the product; customer asking about repair (that is a service query, not negotiation).",
+      "prerequisites": [],
+      "preferred_signals": [
+        "trust",
+        "price"
+      ],
+      "expected_outcome": "Risk objection resolved; price defended with included protection.",
+      "compatible_followups": [
+        "SK-03",
+        "SK-10"
+      ],
+      "prohibited_situations": [
+        "extending warranty terms beyond the approved line",
+        "claiming coverage that does not exist"
+      ],
+      "performance": {
+        "uses": 0,
+        "wins": 0,
+        "losses": 0
+      },
+      "version": 1,
+      "status": "approved",
+      "line": "Ji tension na lein — {benefits}. Koi manufacturing masla to humari zimmedari hai, aapki nahi.",
+      "priority": {
+        "trust": 3
+      }
+    },
+    {
+      "skill_id": "SK-06",
+      "skill_name": "Feature-Value Translation",
+      "purpose": "Translate specs into daily-use value relevant to the customer's stated interest.",
+      "when_to_use": "Feature/value interest (camera, battery, display, gaming).",
+      "when_not_to_use": "Pure price objection with no feature hook.",
+      "prerequisites": [],
+      "preferred_signals": [
+        "feature"
+      ],
+      "expected_outcome": "Specs become felt value; price objection softens.",
+      "compatible_followups": [
+        "SK-03",
+        "SK-10"
+      ],
+      "prohibited_situations": [
+        "invented specs",
+        "performance claims beyond approved data"
+      ],
+      "performance": {
+        "uses": 0,
+        "wins": 0,
+        "losses": 0
+      },
+      "version": 1,
+      "status": "approved",
+      "line": "Ji, aap jo feature dekh rahe hain wo daily use mein kaam aayega. Aur yaad rakhiye — {benefits}.",
+      "priority": {
+        "feature": 3
+      }
+    },
+    {
+      "skill_id": "SK-07",
+      "skill_name": "Competitor Comparison",
+      "purpose": "Address competitor-price pressure truthfully: never confirm or invent competitor prices; anchor on what the approved price INCLUDES.",
+      "when_to_use": "Customer cites market/other-store pricing.",
+      "when_not_to_use": "No approved value stack for the product; customer asking for a price match guarantee (not an approved offer).",
+      "prerequisites": [],
+      "preferred_signals": [
+        "competitor"
+      ],
+      "expected_outcome": "Comparison reframed from price-only to price+inclusions; no fabricated competitor data.",
+      "compatible_followups": [
+        "SK-03",
+        "SK-10",
+        "SK-08"
+      ],
+      "prohibited_situations": [
+        "confirming competitor prices",
+        "inventing competitor prices",
+        "fake price-match guarantees"
+      ],
+      "performance": {
+        "uses": 0,
+        "wins": 0,
+        "losses": 0
+      },
+      "version": 1,
+      "status": "approved",
+      "line": "Ji, dusre store ke rates main yahan se verify nahi kar sakta — lekin ek cheez clear hai: hamari *{offer}* mein ye sab included hai: {benefits}. Quality aur support mein hum compromise nahi karte.",
+      "priority": {
+        "competitor": 3
+      }
+    },
+    {
+      "skill_id": "SK-08",
+      "skill_name": "Budget Discovery",
+      "purpose": "Find the real budget constraint and route to the approved EMI option (existing EMI policy) instead of an instant discount.",
+      "when_to_use": "Budget pressure; payment-feasibility concern.",
+      "when_not_to_use": "Customer is paying cash at the current price; EMI not applicable to the product.",
+      "prerequisites": [],
+      "preferred_signals": [
+        "budget"
+      ],
+      "expected_outcome": "Budget concern met via approved EMI path; price held.",
+      "compatible_followups": [
+        "SK-03",
+        "SK-10"
+      ],
+      "prohibited_situations": [
+        "inventing EMI terms",
+        "promising EMI approval"
+      ],
+      "performance": {
+        "uses": 0,
+        "wins": 0,
+        "losses": 0
+      },
+      "version": 1,
+      "status": "approved",
+      "line": "Ji, budget samajh gaya. {name} ke liye EMI (3-12 mahine) ka option hai — \"emi {id}\" likhein to plan dikhata hoon. Aasani se manage ho jata hai.",
+      "priority": {
+        "budget": 3
+      }
+    },
+    {
+      "skill_id": "SK-09",
+      "skill_name": "Controlled Concession",
+      "purpose": "The ONLY skill that moves the number down — one bounded step, within the owner-approved range, after value-first is satisfied or an explicit price-to-pay is stated.",
+      "when_to_use": "Engine gate open: product VERIFIED + floor RESOLVED + (value skill already used OR customer stated an explicit price to pay) + offer above floor.",
+      "when_not_to_use": "NEVER as first response to a discount request; never for STALE/UNKNOWN products; never when floor is unresolved; never when customer is ready to buy at the current offer.",
+      "prerequisites": [
+        "authority_gated: structural engine gate (not learnable)"
+      ],
+      "preferred_signals": [],
+      "expected_outcome": "Smallest justified concession; maximum approved selling price preserved.",
+      "compatible_followups": [
+        "SK-10"
+      ],
+      "prohibited_situations": [
+        "below the floor",
+        "before value-first",
+        "larger than one step per turn",
+        "volunteered without context"
+      ],
+      "performance": {
+        "uses": 0,
+        "wins": 0,
+        "losses": 0
+      },
+      "version": 1,
+      "status": "approved",
+      "authority_gated": true,
+      "line": "Ji theek hai — main apni taraf se adjust kar raha hoon: *{offer_new}*. Kya hum is par fix kar lein?"
+    },
+    {
+      "skill_id": "SK-10",
+      "skill_name": "Closing",
+      "purpose": "Attempt the close at the current (highest approved) offer — stop negotiating when the customer is ready.",
+      "when_to_use": "Customer signals readiness; after each concession (re-evaluate → close); after successful value response.",
+      "when_not_to_use": "Customer actively objecting with no softening (close questions read as pressure).",
+      "prerequisites": [],
+      "preferred_signals": [
+        "closing"
+      ],
+      "expected_outcome": "Sale at the current approved price.",
+      "compatible_followups": [],
+      "prohibited_situations": [
+        "fake urgency",
+        "fake scarcity",
+        "promising anything not approved"
+      ],
+      "performance": {
+        "uses": 0,
+        "wins": 0,
+        "losses": 0
+      },
+      "version": 1,
+      "status": "approved",
+      "line": "Kya hum *{offer}* par fix kar lein? Theek ho to store par aayen — payment aur delivery wahan hi ho jayegi. 🤝"
+    },
+    {
+      "skill_id": "SK-11",
+      "skill_name": "Re-close after objection",
+      "purpose": "Re-engage a customer who pushed back (or walked and returned) at the LAST authorized position — never reopen above it, never below the floor.",
+      "when_to_use": "Second+ round on the same objection; customer returns after walking away.",
+      "when_not_to_use": "First turn (that is discovery/value, not re-close).",
+      "prerequisites": [],
+      "preferred_signals": [
+        "price",
+        "competitor",
+        "budget",
+        "trust"
+      ],
+      "expected_outcome": "Conversation resumes at the last authorized offer without new authority.",
+      "compatible_followups": [
+        "SK-03",
+        "SK-10"
+      ],
+      "prohibited_situations": [
+        "inventing a new lower price on re-open",
+        "fake guilt/urgency"
+      ],
+      "performance": {
+        "uses": 0,
+        "wins": 0,
+        "losses": 0
+      },
+      "version": 1,
+      "status": "approved",
+      "line": "Ji, khush aamdeed wapis! Aapki baat note ki hui thi. Hum *{offer}* par aage badh sakte hain — {benefits}. Kya ab discuss karein?"
+    },
+    {
+      "skill_id": "SK-12",
+      "skill_name": "Walk-away / Floor Protection",
+      "purpose": "State the floor as the final autonomous position when it is reached; route to the human path instead of inventing new authority.",
+      "when_to_use": "Offer equals the owner floor AND customer still objects or asks below floor.",
+      "when_not_to_use": "Above the floor (that is controlled concession territory); floor unresolved (that is the staff path from the start).",
+      "prerequisites": [
+        "authority_gated: structural engine gate (not learnable)"
+      ],
+      "preferred_signals": [],
+      "expected_outcome": "Floor held; honest final position; CAP-008 human path offered/used.",
+      "compatible_followups": [],
+      "prohibited_situations": [
+        "below-floor offers",
+        "claiming owner approval that does not exist",
+        "promising that the owner will approve a lower price"
+      ],
+      "performance": {
+        "uses": 0,
+        "wins": 0,
+        "losses": 0
+      },
+      "version": 1,
+      "status": "approved",
+      "authority_gated": true,
+      "line": "*{offer}* meri aakhri price hai — is se neeche main ja nahi sakta. 🙏 Kya hum is par proceed karein? Warna *staff* likhein — team aapki madad kare gi."
+    }
+  ]
+}
