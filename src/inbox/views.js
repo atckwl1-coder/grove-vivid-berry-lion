@@ -44,7 +44,7 @@ export const loginPage = (err = '') => `<!doctype html><meta charset=utf-8><titl
 <button style="width:100%">Login</button></form>
 <p class=tag>Internal staff tool. All actions are audited.</p></div>`;
 
-export function listPage(actor, convs, killState = { state: 'AUTOMATION_ACTIVE' }, csrf = '', err = '') {
+export function listPage(actor, convs, killState = { state: 'AUTOMATION_ACTIVE' }, csrf = '', err = '', info = '', unpaid = []) {
   const rows = convs.map((c) => `<tr>
     <td>${c.unread ? '⚑ ' : ''}<a href="/inbox/c/${encodeURIComponent(c.phone)}">${esc(c.phone)}</a></td>
     <td>${esc((c.lastMessage || c.reason || '').slice(0, 60))}</td>
@@ -63,9 +63,31 @@ export function listPage(actor, convs, killState = { state: 'AUTOMATION_ACTIVE' 
          <input type=hidden name=csrf value="${esc(csrf)}"><input type=hidden name=actionId value="${actionId()}">
          <input name=reason placeholder="reason (optional)">
          <button style="background:#b91c1c">🛑 STOP ALL autonomous actions</button></form>` : ''}</div>`;
-  return page('Inbox', actor, `${banner}${err ? `<div class=err>${esc(err)}</div>` : ''}
+  const unpaidRows = (unpaid || []).map((s) => `
+    <tr>
+      <td>${esc(s.phone || '')}</td>
+      <td>${esc(s.product || '?')}</td>
+      <td>${esc(s.verification || '—')}</td>
+      <td>${esc(s.at || '')}</td>
+      <td>
+        <form class=inline method=post action="/inbox/c/${encodeURIComponent(s.phone)}/confirm-paid">
+          <input type=hidden name=csrf value="${esc(csrf)}">
+          <input type=hidden name=actionId value="${actionId()}">
+          <input type=hidden name=product value="${esc(s.product || '')}">
+          <input type=hidden name=at value="${esc(s.at || '')}">
+          <button>Mark as PAID (staff-confirmed)</button>
+        </form>
+      </td>
+    </tr>`).join('');
+  const unpaidPanel = `
+    <h3>Stated purchases awaiting staff paid confirmation (${(unpaid || []).length})</h3>
+    <p class=tag>Does not require a CAP-008 conversation. Not a payment gateway. Does not send WhatsApp.</p>
+    <table><tr><th>Customer</th><th>Product</th><th>Verification</th><th>At</th><th>Action</th></tr>
+    ${unpaidRows || '<tr><td colspan=5>No unpaid stated purchases.</td></tr>'}</table>`;
+  return page('Inbox', actor, `${banner}${err ? `<div class=err>${esc(err)}</div>` : ''}${info ? `<div class=inf>${esc(info)}</div>` : ''}
 <h3>Conversations (${convs.length})</h3>
 <table><tr><th>Customer</th><th>Last</th><th>State</th><th>Assigned</th><th>Reason</th><th>SLA</th></tr>${rows || '<tr><td colspan=6>No escalations yet.</td></tr>'}</table>
+${unpaidPanel}
 ${actor.role === 'OWNER' ? '<p><a href="/inbox/ops">Owner ops</a> · <a href="/inbox/b2">B-2 preflight</a></p>' : ''}<p class=tag>Auto-sort: QUEUED first, then unread count, then SLA pressure.</p>`);
 }
 

@@ -163,6 +163,11 @@ export function statedSalesFor(phone) {
   return negotiationOutcomes().filter((r) => r.phone === phone && r.outcome === 'sale');
 }
 
+/** Stated purchases not yet staff-confirmed paid. Listing helper only. */
+export function unpaidStatedSales() {
+  return negotiationOutcomes().filter((r) => r.outcome === 'sale' && r.verification !== 'paid');
+}
+
 /**
  * Staff (or a future POS hook) confirms that a stated sale was actually paid.
  * Does NOT invent a sale — the engine-recorded stated_accept must already exist.

@@ -29,7 +29,7 @@ function row(metric, value, source) {
   return `<tr><td>${esc(metric)}</td><td>${fmt(value)}</td><td class=tag>${esc(source)}</td></tr>`;
 }
 
-export function opsPage(actor, snap, csrf = '') {
+export function opsPage(actor, snap, csrf = '', unpaid = []) {
   void csrf;
   const a = actor || {};
   const s = snap || {};
@@ -85,6 +85,16 @@ ${row('stated_unpaid', s.stated_unpaid, 'sale + verification=customer_statement'
 ${row('pending_followups', s.pending_followups, 'followups SCHEDULED|QUEUED')}
 ${row('unresolved_issues', s.unresolved_issues, 'followups status=ESCALATED')}
 ${row('monetary_rejects', s.monetary_rejects, 'audit.jsonl type=LLM_NUMBER_REJECTED')}
+</table>
+<h3>Unpaid stated purchases (${(unpaid || []).length})</h3>
+<p class=tag>Mark as PAID does not require a conversation row. Not a PSP. Not a WhatsApp send.</p>
+<table><tr><th>Customer</th><th>Product</th><th>At</th><th>Action</th></tr>
+${(unpaid || []).map((u) => `<tr>
+  <td>${esc(u.phone || '')}</td><td>${esc(u.product || '?')}</td><td>${esc(u.at || '')}</td>
+  <td><form class=inline method=post action="/inbox/c/${encodeURIComponent(u.phone)}/confirm-paid">
+    <input type=hidden name=csrf value="${esc(csrf)}"><input type=hidden name=actionId value="act-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}">
+    <input type=hidden name=product value="${esc(u.product || '')}"><input type=hidden name=at value="${esc(u.at || '')}">
+    <button>Mark as PAID</button></form></td></tr>`).join('') || '<tr><td colspan=4>None.</td></tr>'}
 </table>
 <p class=tag><a href="/inbox">← back to inbox</a> · Staff can view if route allows — route will be OWNER gated by LEAD.</p>
 <p class=tag>Deterministic owner snapshot. No session tokens, passwords, or WhatsApp tokens on this page.</p>`;
