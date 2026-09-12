@@ -11,6 +11,7 @@ import path from 'path';
 import { config } from '../config.js';
 import { atomicWriteJson } from '../sentinel/store.js';
 import { audit } from '../sentinel/audit.js';
+import { catalog } from './catalog.js';
 
 const EMPTY_DB = () => ({ customers: {}, messages: [], reservations: [], campaigns: [], negotiations: [], followups: [] });
 
@@ -166,6 +167,59 @@ export function statedSalesFor(phone) {
 /** Stated purchases not yet staff-confirmed paid. Listing helper only. */
 export function unpaidStatedSales() {
   return negotiationOutcomes().filter((r) => r.outcome === 'sale' && r.verification !== 'paid');
+}
+
+function catalogSku(product) {
+  const sku = String(product || '').trim().toLowerCase().replace(/[\s-]/g, '');
+  if (!sku) return null;
+  const products = catalog()?.products;
+  if (!Array.isArray(products)) return null;
+  return products.find((p) => String(p?.id || '').toLowerCase() === sku) || null;
+}
+
+/**
+ * Staff records an unpaid stated purchase for a catalog SKU.
+ * Does NOT mark paid, send WhatsApp, or invent a price/floor.
+ * Duplicate unpaid (same phone + SKU) is idempotent.
+ * LLM/router must not call this.
+ */
+export function recordStaffStatedSale({ phone, product, staffId = 'staff', actionId = null } = {}) {
+  const p = String(phone || '').trim();
+  if (!p || !/^\d{8,15}$/.test(p)) {
+    const e = new Error('INVALID_PHONE: customer phone must be 8–15 digits');
+    e.code = 'INVALID_PHONE';
+    throw e;
+  }
+  const hit = catalogSku(product);
+  if (!hit) {
+    const e = new Error('UNKNOWN_SKU: product is not a catalog SKU');
+    e.code = 'UNKNOWN_SKU';
+    throw e;
+  }
+  const unpaid = negotiationOutcomes().find((r) =>
+    r && r.phone === p && r.product === hit.id && r.outcome === 'sale' && r.verification !== 'paid');
+  if (unpaid) {
+    audit('SALE_STATED_ALREADY', {
+      phone: p, product: hit.id, staffId: String(staffId || 'staff'), actionId: actionId || null,
+    });
+    return { rec: unpaid, status: 'ALREADY_RECORDED' };
+  }
+  touchCustomer(p);
+  recordNegotiation({
+    phone: p,
+    product: hit.id,
+    outcome: 'sale',
+    verification: 'customer_statement',
+    source: 'staff',
+    staffId: String(staffId || 'staff'),
+    actionId: actionId || null,
+    note: 'staff-recorded stated purchase of a catalog SKU; not a verified payment',
+  });
+  const rec = statedSalesFor(p).filter((r) => r.product === hit.id).at(-1);
+  audit('SALE_STATED_RECORDED', {
+    phone: p, product: hit.id, staffId: String(staffId || 'staff'), actionId: actionId || null,
+  });
+  return { rec, status: 'STATED_RECORDED' };
 }
 
 /**

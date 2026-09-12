@@ -8,7 +8,7 @@ import * as auth from '../sentinel/auth.js';
 import * as conv from '../sentinel/conversations.js';
 import * as wa from '../services/whatsapp.js';
 import * as kill from '../sentinel/killswitch.js';
-import { getCustomer, recentMessages, statedSalesFor, confirmPaidSale, listFollowups, unpaidStatedSales } from '../services/customers.js';
+import { getCustomer, recentMessages, statedSalesFor, confirmPaidSale, listFollowups, unpaidStatedSales, recordStaffStatedSale } from '../services/customers.js';
 import { audit, auditTail } from '../sentinel/audit.js';
 import { loginPage, listPage, convoPage, errorPage } from '../inbox/views.js';
 import { qualificationOf, listQueuedLeads } from '../services/qualification.js';
@@ -67,7 +67,7 @@ function requireHomeTenant(actor, req, res) {
   return true;
 }
 const redir = (res, phone, note) => res.redirect(`/inbox/c/${encodeURIComponent(phone)}${note ? `?note=${encodeURIComponent(note)}` : ''}`);
-const httpCode = (e) => ({ NOT_FOUND: 404, ILLEGAL_TRANSITION: 409, NOT_OWNER: 403, ALREADY_CLAIMED: 409, ACTION_ID_REQUIRED: 400, NO_STATED_SALE: 409, EMPTY_BODY: 400 }[e.code] || 500);
+const httpCode = (e) => ({ NOT_FOUND: 404, ILLEGAL_TRANSITION: 409, NOT_OWNER: 403, ALREADY_CLAIMED: 409, ACTION_ID_REQUIRED: 400, NO_STATED_SALE: 409, EMPTY_BODY: 400, INVALID_PHONE: 400, UNKNOWN_SKU: 400 }[e.code] || 500);
 
 async function handleAction(req, res, fn, okNote) {
   const actor = requireAuth(req, res); if (!actor) return;
@@ -200,6 +200,41 @@ inboxRouter.post('/inbox/c/:phone/close', (req, res) =>
 // Conversation row is NOT required. Auth + CSRF + home-tenant + an
 // engine-recorded stated sale are sufficient. CAP-008 FSM is not invoked.
 inboxRouter.post('/inbox/c/:phone/confirm-paid', (req, res) => handleConfirmPaid(req, res));
+
+// Staff records an unpaid catalog stated sale. Not paid, not POS, not a send.
+// Conversation row is NOT required. CAP-008 FSM is not invoked.
+inboxRouter.post('/inbox/stated-sale', (req, res) => handleRecordStatedSale(req, res));
+
+async function handleRecordStatedSale(req, res) {
+  const actor = requireAuth(req, res); if (!actor) return;
+  if (!requireCsrf(actor, req, res)) return;
+  if (!requireHomeTenant(actor, req, res)) return;
+  try {
+    conv.requireActionId(req.body?.actionId);
+    const phone = String(req.body?.phone || req.params?.phone || '').trim();
+    const product = String(req.body?.product || '').trim();
+    const { rec, status } = recordStaffStatedSale({
+      phone,
+      product,
+      staffId: actor.staffId,
+      actionId: req.body.actionId,
+    });
+    const sale = rec ? {
+      phone: rec.phone,
+      product: rec.product,
+      at: rec.at,
+      verification: rec.verification,
+    } : null;
+    if (wantsJson(req)) return res.json({ ok: true, status, sale, conversation: null });
+    const note = status === 'ALREADY_RECORDED'
+      ? 'ALREADY_RECORDED: unpaid stated sale already exists (no duplicate)'
+      : 'STATED SALE RECORDED (unpaid)';
+    return res.redirect(`/inbox?note=${encodeURIComponent(note)}`);
+  } catch (e) {
+    if (wantsJson(req)) return res.status(httpCode(e)).json({ ok: false, error: e.code || 'ERROR', detail: String(e.message).slice(0, 120) });
+    return res.status(httpCode(e)).send(errorPage(actor, `${e.code || 'ERROR'}: ${e.message}`));
+  }
+}
 
 async function handleConfirmPaid(req, res) {
   const actor = requireAuth(req, res); if (!actor) return;

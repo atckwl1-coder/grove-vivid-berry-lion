@@ -83,7 +83,15 @@ export function listPage(actor, convs, killState = { state: 'AUTOMATION_ACTIVE' 
     <h3>Stated purchases awaiting staff paid confirmation (${(unpaid || []).length})</h3>
     <p class=tag>Does not require a CAP-008 conversation. Not a payment gateway. Does not send WhatsApp.</p>
     <table><tr><th>Customer</th><th>Product</th><th>Verification</th><th>At</th><th>Action</th></tr>
-    ${unpaidRows || '<tr><td colspan=5>No unpaid stated purchases.</td></tr>'}</table>`;
+    ${unpaidRows || '<tr><td colspan=5>No unpaid stated purchases.</td></tr>'}</table>
+    <form method=post action="/inbox/stated-sale" style="margin-top:12px">
+      <input type=hidden name=csrf value="${esc(csrf)}">
+      <input type=hidden name=actionId value="${actionId()}">
+      <input name=phone placeholder="customer phone (digits)" required>
+      <input name=product placeholder="catalog SKU (e.g. reno16)" required>
+      <button>Record stated sale (unpaid)</button>
+    </form>
+    <p class=tag>Staff-recorded intent only. Does not mark paid. Does not send WhatsApp. Catalog SKU required.</p>`;
   const leadRows = (leads || []).map((l) => `<tr>
     <td>${esc(l.phone || '')}</td>
     <td>${esc(l.stage || '')}</td>
