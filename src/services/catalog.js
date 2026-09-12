@@ -18,7 +18,21 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PRODUCTS_FILE = path.join(__dirname, '../data/products.json');
+const DEFAULT_PRODUCTS_FILE = path.join(__dirname, '../data/products.json');
+
+// Test isolation: tests copy the owner file and point CATALOG_FILE at the copy.
+// Production never sets this — the shipped owner file is the authority.
+export function catalogFile() {
+  return process.env.CATALOG_FILE || DEFAULT_PRODUCTS_FILE;
+}
+
+// Test isolation: inject a frozen clock so 24h TTL tests do not depend on
+// wall-clock age of shipped observed_at stamps.
+export function catalogNow() {
+  const env = process.env.CATALOG_NOW_MS;
+  if (env != null && env !== '' && Number.isFinite(Number(env))) return Number(env);
+  return Date.now();
+}
 
 // CAP-003 provider_failure: file unreadable / bad schema → honest sentinel.
 // NEVER last-good-as-current (§27): no cache, no fallback prices, no memory.
@@ -26,7 +40,7 @@ const CORRUPT = Object.freeze({ products: [], policies: null, corrupted: true, r
 
 export function catalog() {
   try {
-    const c = JSON.parse(fs.readFileSync(PRODUCTS_FILE, 'utf8'));
+    const c = JSON.parse(fs.readFileSync(catalogFile(), 'utf8'));
     if (!c || typeof c !== 'object' || !Array.isArray(c.products)) throw new Error('bad schema: products[] missing');
     return c;
   } catch {
@@ -49,7 +63,7 @@ export function parseObservedAt(v, now = Date.now()) {
 
 // Deterministic per-product classification. Malformed price → UNKNOWN:
 // a non-numeric price is never rendered (no NaN, no invented number).
-export function productStatus(p, now = Date.now()) {
+export function productStatus(p, now = catalogNow()) {
   if (!p || typeof p.price !== 'number' || !Number.isFinite(p.price) || p.price <= 0) {
     return { status: 'UNKNOWN', observedAt: null };
   }
@@ -66,7 +80,7 @@ export const observedAtIso = (t) => new Date(t).toISOString().slice(0, 10);
 // VERIFIED → quotable as today's price, dated. STALE → contract wording
 // 'rates kal ke ho sakte hain — confirm karein', dated, no scarcity.
 // UNKNOWN  → NO number at all. Corrupt → contract wording 'rates par kaam jaari hai'.
-export function priceCardLine(p, now = Date.now()) {
+export function priceCardLine(p, now = catalogNow()) {
   if (isCatalogCorrupted()) {
     return '⚠️ Rates par kaam jaari hai — abhi prices confirm nahi ho sakte. *staff* likhein, team aapki madad kare gi.';
   }
@@ -78,7 +92,7 @@ export function priceCardLine(p, now = Date.now()) {
 
 // CAP-003 stale_data failure state: "scarcity counters auto-disabled".
 // A stale/unknown stock count is a currency claim about inventory → no number.
-export function stockLine(p, now = Date.now()) {
+export function stockLine(p, now = catalogNow()) {
   if (isCatalogCorrupted()) return null;
   const { status } = productStatus(p, now);
   if (status !== 'VERIFIED') return null;
@@ -88,7 +102,7 @@ export function stockLine(p, now = Date.now()) {
 }
 
 // Compact per-model line for the menu list (same authority rules, short form).
-export function menuPriceLine(p, now = Date.now()) {
+export function menuPriceLine(p, now = catalogNow()) {
   if (isCatalogCorrupted()) return `price store par confirm ho gi`;
   const { status, observedAt } = productStatus(p, now);
   if (status === 'VERIFIED') {
@@ -104,7 +118,7 @@ export function menuPriceLine(p, now = Date.now()) {
 // V1-3: products may legitimately omit variant/stock/highlights (owner supplied
 // only price) — optional fields render as 'n/a'/omitted, NEVER 'undefined'
 // (V1-2 no-undefined discipline extended to optional fields).
-export function modelCatalogLine(p, now = Date.now()) {
+export function modelCatalogLine(p, now = catalogNow()) {
   if (isCatalogCorrupted()) return 'CATALOG_UNAVAILABLE — rates par kaam jaari hai; koi price/stock number quote NAHI karein; handoff=true';
   const { status, observedAt } = productStatus(p, now);
   const variant = p.variant ? ` (${p.variant})` : '';
@@ -120,7 +134,7 @@ export function modelCatalogLine(p, now = Date.now()) {
 // CAP-003): attached ONLY for VERIFIED products; STALE/UNKNOWN → null (absent
 // evidence ⇒ class rules govern). Consumers: negotiation engine (V1-3).
 // Kept here so catalog authority + evidence construction never split.
-export function catalogEvidence(p, now = Date.now()) {
+export function catalogEvidence(p, now = catalogNow()) {
   if (isCatalogCorrupted()) return null;
   const { status, observedAt } = productStatus(p, now);
   if (status !== 'VERIFIED' || !observedAt) return null;
@@ -138,7 +152,7 @@ export function approvedBenefitsLine(p) {
 }
 
 // Corrupt-safe policy text (flows never print "undefined" when the file is down).
-export function policyText(key, now = Date.now()) {
+export function policyText(key, now = catalogNow()) {
   const c = catalog(now);
   const v = c?.policies?.[key];
   return (typeof v === 'string' && v.trim() !== '') ? v : 'abhi confirm nahi ho sakti';

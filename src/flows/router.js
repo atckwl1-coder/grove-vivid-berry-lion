@@ -6,10 +6,13 @@ import * as wa from '../services/whatsapp.js';
 import { catalog, findProduct, formatPrice, priceCardLine, stockLine, menuPriceLine, productStatus, isCatalogCorrupted, policyText } from '../services/catalog.js';
 import { emiPlanFor } from '../services/emi.js';
 import { estimateTradeIn } from '../services/tradein.js';
-import { updateCustomer } from '../services/customers.js';
+import { updateCustomer, statedSalesFor } from '../services/customers.js';
 import { escalate } from '../sentinel/conversations.js';
 import { handleNegotiation } from '../services/negotiation.js';
 import { handleFollowUpResponse } from '../services/followups.js';
+import { parseCompareQuery, compareProducts, recommendFor } from '../services/compare.js';
+import { isSetupHelpIntent, composeSetupHelp, isCareIssueIntent, composeIssueHelp } from '../services/care.js';
+import { profileOf } from '../services/profile.js';
 
 export async function routeFlow(from, rawText, msg, customer) {
   const text = rawText.toLowerCase().trim();
@@ -22,7 +25,7 @@ export async function routeFlow(from, rawText, msg, customer) {
         rows: [
           { id: 'menu_phones', title: '📱 Phones & Aaj ki Prices', description: 'Poora OPPO catalog' },
           { id: 'menu_emi', title: '💳 EMI / Installments', description: '3-12 mahine ki asaan iqsaat' },
-          { id: 'menu_tradein', title: '🔄 Purana Phone Exchange', description: 'Photo bhejein, fauran value' },
+          { id: 'menu_tradein', title: '🔄 Purana Phone Exchange', description: 'Model + condition likhein' },
         ],
       },
       {
@@ -57,6 +60,17 @@ export async function routeFlow(from, rawText, msg, customer) {
       { id: 'menu_tradein', title: '🔄 Exchange offer' },
       { id: 'menu_staff', title: '👤 Staff se baat' },
     ]);
+    return true;
+  }
+
+  if (text === 'menu_repair') {
+    // V1-5′ honesty: this row was a dead-end into the LLM. There is no
+    // repair-status backend — say so and offer the real human path.
+    await wa.sendText(from,
+      `🛠️ *Repair / Status*\n` +
+      `WhatsApp se repair booking ya status tracking abhi available nahi. 🙏\n` +
+      `Phone store par laayein, ya *staff* likh kar team se baat karein.\n` +
+      `🕙 ${policyText('timing')}`);
     return true;
   }
 
@@ -125,7 +139,7 @@ export async function routeFlow(from, rawText, msg, customer) {
     const parts = text.split(/\s+/);
     if (parts.length < 3) {
       updateCustomer(from, { state: 'TRADEIN' });
-      await wa.sendText(from, `🔄 *Purana phone exchange — 3 sawal, fauran value!*\n\nLikhain: "trade <model> <condition>"\nMaslan: *trade a57 good*\n\nCondition: good / average / poor\n📸 Ya apne purane phone ki photo bhej dein — main khud condition check kar lunga!`);
+      await wa.sendText(from, `🔄 *Purana phone exchange — 3 sawal, andazan value!*\n\nLikhain: "trade <model> <condition>"\nMaslan: *trade a57 good*\n\nCondition: good / average / poor\n📸 Photo se automatic condition check abhi available nahi — model aur condition likh kar bhejein.`);
       return true;
     }
     const estimate = estimateTradeIn(parts[1], parts[2]);
@@ -146,11 +160,43 @@ export async function routeFlow(from, rawText, msg, customer) {
   const fuHandled = await handleFollowUpResponse(from, text, customer);
   if (fuHandled) return true;
 
+  // ── V1-6 catalog compare (facts only; no floors guessed) ──
+  const cmpQ = parseCompareQuery(rawText);
+  if (cmpQ) {
+    const out = compareProducts(cmpQ.leftQuery, cmpQ.rightQuery);
+    await wa.sendText(from, out.text);
+    return true;
+  }
+
+  // ── V1-6 setup help (copy only; not a scheduled follow-up) ──
+  if (isSetupHelpIntent(rawText)) {
+    const paid = (statedSalesFor(from) || []).filter((s) => s.verification === 'paid').at(-1);
+    const model = paid?.product || profileOf(from)?.preferred_model?.id || null;
+    await wa.sendText(from, composeSetupHelp(model));
+    return true;
+  }
+
+  // ── V1-6 paid-customer care issue → existing human path (no extra chase) ──
+  if (isCareIssueIntent(rawText) && (statedSalesFor(from) || []).some((s) => s.verification === 'paid')) {
+    await wa.sendText(from, composeIssueHelp());
+    try { await escalate(from, 'PRODUCT_EXCEPTION', { aiInference: { intent: 'repair', source: 'v16-care-issue' } }); } catch { /* already queued */ }
+    return true;
+  }
+
+  // ── V1-6 recommend from catalog (budget is CUSTOMER_STATED if present) ──
+  if (/\b(recommend|suggest|konsa\s+(lu|loon|phone)|kaunsa\s+(lu|loon|phone))\b/i.test(rawText)) {
+    const budget = profileOf(from)?.budget?.amount ?? null;
+    const out = recommendFor({ budget, text: rawText });
+    await wa.sendText(from, out.text);
+    return true;
+  }
+
   // ── V1-3 NEGOTIATION FLOW (2026-09-10, CAP-039) ──
   // Deterministic engine owns every number: floor/step/concession come from
   // the owner files, never from the LLM. Fires on negotiation signals
-  // (discount/objection/price-to-pay/ready/walk) or an active session;
-  // plain price queries ("reno16 price") still go to the brain price card.
+  // (discount/objection/price-to-pay/ready/walk) or an active session.
+  // V1-5′: PRICE/COST questions for SKUs with an owner negotiation rule
+  // route here as a catalog-authority read (no concession session, no LLM).
   const negHandled = await handleNegotiation(from, text, msg, customer);
   if (negHandled) return true;
 

@@ -15,6 +15,7 @@ import { log } from './utils/logger.js';
 import { seedStaffIfMissing, assertStaffSafety } from './sentinel/auth.js';
 import * as conversations from './sentinel/conversations.js';
 import { logOutbound } from './services/customers.js';
+import { noteOutboxTerminal } from './services/followups.js';
 import * as waSvc from './services/whatsapp.js';
 import * as killswitch from './sentinel/killswitch.js';
 
@@ -29,7 +30,12 @@ try {
 // Foundation subsystems
 initAudit();
 initIdempotency();
-loadDb();
+try {
+  loadDb();
+} catch (e) {
+  console.error('⛔ ' + e.message);
+  process.exit(1);
+}
 killswitch.initKill(); // CAP-055: global autonomy gate — state restored/genesis before anything can send
 
 // CAP-008 gates: LIVE → staff creds + session secret lazmi; DEMO → labeled demo seed
@@ -48,6 +54,7 @@ const outbox = createOutbox({
   windowGuard: messagingWindowGuard,
   autonomyGuard: (job) => (killswitch.isAutonomousJob(job) ? killswitch.gateForSend(job.payload?.to, { source: job.meta?.source }) : { ok: true }),
   auditFn: audit,
+  onTerminal: noteOutboxTerminal,
   pollMs: config.outboxPollMs,
   retry: config.retry,
 });

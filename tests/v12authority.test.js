@@ -17,8 +17,8 @@
 //
 //  Real path: signed webhook → ingest → brain/flows → P2 firewall →
 //  outbox spy. The LLM is a LOCAL capture double (prompt-label assertions).
-//  Catalog states are exercised by patching the real products.json
-//  (catalog() re-reads it per call); the shipped file is restored in teardown.
+//  Catalog states are exercised by patching a TEMPORARY copy of
+//  products.json (CATALOG_FILE). The shipped owner file is never written.
 // ═══════════════════════════════════════════════════════════════
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -28,10 +28,11 @@ import path from 'path';
 import crypto from 'crypto';
 import http from 'http';
 import { spawnSync } from 'child_process';
+import { isolateOwnerFiles } from './helpers/isolate-owner-files.mjs';
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'sentinelv12-'));
 const REPO = process.cwd();
-const PRODUCTS_FILE = path.join(REPO, 'src/data/products.json');
+const { PRODUCTS_FILE } = isolateOwnerFiles(TMP);
 
 // ── Local LLM capture double (before config import) ──
 const llmRequests = [];
@@ -40,11 +41,15 @@ const llmServer = http.createServer((req, res) => {
   let body = '';
   req.on('data', (c) => { body += c; });
   req.on('end', () => {
-    llmRequests.push(JSON.parse(body));
-    replySeq += 1;
+    let parsed = null;
+    try { parsed = body ? JSON.parse(body) : null; } catch { parsed = null; }
+    if (parsed && typeof parsed === 'object') {
+      llmRequests.push(parsed);
+      replySeq += 1;
+    }
     res.setHeader('Content-Type', 'application/json');
     res.end(JSON.stringify({
-      choices: [{ message: { content: JSON.stringify({ reply: `reply-${replySeq}`, handoff: false, intent: 'general' }) } }],
+      choices: [{ message: { content: JSON.stringify({ reply: `reply-${Math.max(replySeq, 1)}`, handoff: false, intent: 'general' }) } }],
     }));
   });
 });

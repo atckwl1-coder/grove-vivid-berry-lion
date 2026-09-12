@@ -1,26 +1,75 @@
 // ─────────────────────────────────────────────────────────────
 //  CUSTOMER MEMORY — halka JSON database (baad mein SQLite/Postgres)
 //  Har customer ki yaaddasht: naam, language, opt-in, engagement
+//
+//  V1-5′ durability: atomic temp+rename writes; corrupt/unreadable
+//  existing files FAIL CLOSED (never silently wipe customer state).
+//  Missing file on first boot is a legitimate fresh start.
 // ─────────────────────────────────────────────────────────────
 import fs from 'fs';
 import path from 'path';
 import { config } from '../config.js';
+import { atomicWriteJson } from '../sentinel/store.js';
+import { audit } from '../sentinel/audit.js';
 
-let db = { customers: {}, messages: [], reservations: [], campaigns: [], negotiations: [] };
+const EMPTY_DB = () => ({ customers: {}, messages: [], reservations: [], campaigns: [], negotiations: [], followups: [] });
+
+let db = EMPTY_DB();
+
+export class CustomerDbError extends Error {
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+    this.name = 'CustomerDbError';
+  }
+}
+
+function normalizeDb(parsed) {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('bad schema: root object required');
+  const next = { ...EMPTY_DB(), ...parsed };
+  if (!next.customers || typeof next.customers !== 'object' || Array.isArray(next.customers)) {
+    throw new Error('bad schema: customers object required');
+  }
+  if (!Array.isArray(next.messages)) next.messages = [];
+  if (!Array.isArray(next.reservations)) next.reservations = [];
+  if (!Array.isArray(next.campaigns)) next.campaigns = [];
+  if (!Array.isArray(next.negotiations)) next.negotiations = [];
+  if (!Array.isArray(next.followups)) next.followups = [];
+  return next;
+}
 
 export function loadDb() {
-  try {
-    if (fs.existsSync(config.dbFile)) {
-      db = JSON.parse(fs.readFileSync(config.dbFile, 'utf8'));
-    }
-  } catch {
-    console.log('DB corrupt ya missing — fresh start');
-  }
   fs.mkdirSync(path.dirname(config.dbFile), { recursive: true });
+  if (!fs.existsSync(config.dbFile)) {
+    db = EMPTY_DB();
+    return { ok: true, fresh: true };
+  }
+  let raw;
+  try {
+    raw = fs.readFileSync(config.dbFile, 'utf8');
+  } catch (e) {
+    throw new CustomerDbError(
+      'CUSTOMER_DB_UNREADABLE',
+      'CUSTOMER_DB_UNREADABLE: existing customer DB cannot be read — refusing to start with empty state (no silent wipe)',
+    );
+  }
+  try {
+    db = normalizeDb(JSON.parse(raw));
+    return { ok: true, fresh: false };
+  } catch {
+    throw new CustomerDbError(
+      'CUSTOMER_DB_CORRUPT',
+      'CUSTOMER_DB_CORRUPT: existing customer DB is unreadable JSON — refusing to start with empty state (no silent wipe)',
+    );
+  }
 }
 
 function save() {
-  fs.writeFileSync(config.dbFile, JSON.stringify(db, null, 2));
+  // Single-process: save() is synchronous, so overlapping event-loop
+  // callbacks cannot interleave stringify+write. atomicWriteJson makes
+  // the replacement durable (tmp + fsync + rename) so a crash cannot
+  // leave a truncated dest file.
+  atomicWriteJson(config.dbFile, db);
 }
 
 // Customer ko touch karo — naya ho to banao, engagement update karo
@@ -43,7 +92,7 @@ export function touchCustomer(phone, name = '') {
   const c = db.customers[phone];
   if (name && !c.name) c.name = name;
   c.lastSeen = new Date().toISOString();
-  c.engagement = Math.min(100, c.engagement + 2); // message bhejna = interest
+  c.engagement = Math.min(100, (c.engagement || 0) + 2); // message bhejna = interest
   save();
   return c;
 }
@@ -61,23 +110,6 @@ export function recentMessages(phone, n = 20) {
 }
 
 // ── V1-1 (2026-09-09): bounded MODEL-context transcript — DERIVED, no new storage.
-// Same source of truth as the CAP-008 §6 staff context (db.messages), mapped to
-// model roles: inbound → 'user' (untrusted customer content), outbound text →
-// 'assistant' (what the customer saw). Contract — smallest deterministic policy
-// (assumptions documented, nothing invented beyond repo conventions):
-//   • per-customer   : hard filter by phone (isolation)
-//   • bounded        : last `n` eligible entries (default 12 ≈ 6 turns); each
-//                      entry ≤ 500 chars (existing log truncation) → ≤ 6000 chars
-//   • ordering       : chronological (array push order)
-//   • skips          : empty/non-string text; inbound internal flow tokens
-//                      (/^menu_[a-z_]+$/ — button/list ids, not customer language)
-//   • persistence    : existing customers-DB semantics (save() on every log;
-//                      loadDb() restores at boot; parse-corrupt → fresh start)
-//   • schema-corrupt : [] — fail-safe (valid JSON, wrong shape); stricter here
-//                      than recentMessages because this feeds a model
-// Sensitive-zone rule (DEBT-18): ONLY this customer's own conversation text may
-// enter the LLM — no other-customer content, no phone numbers in content, no new
-// storage, no change to redacted surfaces (audit/demo) or to log semantics.
 export function recentConversation(phone, n = 12) {
   const rows = Array.isArray(db.messages) ? db.messages : [];
   return rows
@@ -113,17 +145,59 @@ export function setConsent(phone, value, source) {
 }
 
 // ── V1-3 (2026-09-10): negotiation outcome records — LEARNING DATA (tactics
-// only). Captured ONLY from deterministic engine events (never LLM statements):
-//   verification = 'customer_statement' — this deployment has NO payment
-//   system, so a "sale" is the customer's stated acceptance of an approved
-//   price, never a verified payment. Never fabricated; never backfilled.
+// only). Captured ONLY from deterministic engine events (never LLM statements).
+//
+// V1-5′ sale truth:
+//   verification = 'customer_statement'  → stated purchase INTENT (not paid)
+//   verification = 'paid'                → staff-confirmed paid sale
+// A "sale" speech act is NOT a verified payment. Follow-up requires `paid`.
 export function recordNegotiation(rec) {
   db.negotiations = Array.isArray(db.negotiations) ? db.negotiations : [];
-  db.negotiations.push({ ...rec, at: new Date().toISOString() });
+  db.negotiations.push({ ...rec, at: rec.at && Number.isFinite(Date.parse(rec.at)) ? rec.at : new Date().toISOString() });
   if (db.negotiations.length > 1000) db.negotiations = db.negotiations.slice(-800);
   save();
 }
 export const negotiationOutcomes = () => (Array.isArray(db.negotiations) ? db.negotiations : []);
+
+export function statedSalesFor(phone) {
+  return negotiationOutcomes().filter((r) => r.phone === phone && r.outcome === 'sale');
+}
+
+/**
+ * Staff (or a future POS hook) confirms that a stated sale was actually paid.
+ * Does NOT invent a sale — the engine-recorded stated_accept must already exist.
+ * Already-paid records are idempotent: no second confirmation blob, no extra
+ * follow-up id. LLM/customer language cannot call this function.
+ */
+export function confirmPaidSale({ phone, product, at, staffId = 'staff', source = 'staff', actionId = null } = {}) {
+  const rows = negotiationOutcomes();
+  let rec = null;
+  if (phone && product && at) rec = rows.find((r) => r.phone === phone && r.product === product && r.at === at && r.outcome === 'sale') || null;
+  if (!rec && phone && product) rec = [...rows].reverse().find((r) => r.phone === phone && r.product === product && r.outcome === 'sale') || null;
+  if (!rec && phone) rec = [...rows].reverse().find((r) => r.phone === phone && r.outcome === 'sale') || null;
+  if (!rec) return null;
+  if (rec.verification === 'paid' && rec.sale_confirmation?.kind === 'staff_confirmed_paid') {
+    audit('SALE_PAID_ALREADY_CONFIRMED', {
+      phone: rec.phone,
+      product: rec.product,
+      staffId: String(staffId || 'staff'),
+      actionId: actionId || null,
+    });
+    return rec;
+  }
+  rec.stated_intent_at = rec.stated_intent_at || rec.at;
+  rec.verification = 'paid';
+  rec.sale_confirmation = {
+    kind: 'staff_confirmed_paid',
+    staffId: String(staffId || 'staff'),
+    source: source === 'pos' ? 'pos' : 'staff',
+    at: new Date().toISOString(),
+    actionId: actionId || null,
+  };
+  save();
+  audit('SALE_PAID_CONFIRMED', { phone: rec.phone, product: rec.product, staffId: rec.sale_confirmation.staffId, source: rec.sale_confirmation.source, actionId: rec.sale_confirmation.actionId });
+  return rec;
+}
 
 // ── V1-4 (2026-09-10): post-purchase follow-up records — the lifecycle of
 // the single satisfaction follow-up per qualifying purchase. Stored in the

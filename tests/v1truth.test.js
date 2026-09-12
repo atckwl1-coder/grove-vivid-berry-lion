@@ -25,9 +25,11 @@ import os from 'os';
 import path from 'path';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
+import { isolateOwnerFiles } from './helpers/isolate-owner-files.mjs';
 
 // ── Environment BEFORE any module load (ESM imports hoist) ──
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'sentinelv1-'));
+const { PRODUCTS_FILE } = isolateOwnerFiles(TMP);
 process.env.DB_FILE = path.join(TMP, 'db.json');
 process.env.AUDIT_FILE = path.join(TMP, 'audit.jsonl');
 process.env.IDEM_DIR = path.join(TMP, 'idem');
@@ -47,7 +49,6 @@ const wa = await import('../src/services/whatsapp.js');
 const { buildApp } = await import('../src/app.js');
 
 const CUSTOMER = '923001110010';
-const PRODUCTS_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), '../src/data/products.json');
 
 // V1-2 fixture: owner-just-verified catalog (observed_at=now) — deterministic
 // FRESH-data state for this suite's price assertions (shipped file restored in

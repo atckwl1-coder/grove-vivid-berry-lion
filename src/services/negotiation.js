@@ -41,14 +41,17 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { catalog, findProduct, productStatus, formatPrice, observedAtIso, catalogEvidence, approvedBenefitsLine } from './catalog.js';
+import { catalog, findProduct, productStatus, formatPrice, observedAtIso, catalogEvidence, approvedBenefitsLine, priceCardLine, stockLine } from './catalog.js';
 import { getCustomer, updateCustomer, recordNegotiation, negotiationOutcomes } from './customers.js';
 import * as wa from './whatsapp.js';
 import { escalate } from '../sentinel/conversations.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const RULES_FILE = path.join(__dirname, '../data/negotiation-rules.json');
-const SKILLS_FILE = path.join(__dirname, '../data/sales-skills.json');
+const DEFAULT_RULES_FILE = path.join(__dirname, '../data/negotiation-rules.json');
+const DEFAULT_SKILLS_FILE = path.join(__dirname, '../data/sales-skills.json');
+
+const rulesFile = () => process.env.NEGOTIATION_RULES_FILE || DEFAULT_RULES_FILE;
+const skillsFile = () => process.env.SALES_SKILLS_FILE || DEFAULT_SKILLS_FILE;
 
 const CORRUPT_RULES = Object.freeze({ corrupted: true, products: {}, policy: {} });
 const VALUE_SKILLS = ['SK-01', 'SK-02', 'SK-03', 'SK-04', 'SK-05', 'SK-06', 'SK-07', 'SK-08'];
@@ -57,7 +60,7 @@ const DEFAULT_STEP_PCT = 1.0; // documented default when the owner file lacks a 
 // ── owner authority (read-only) ──
 export function loadRules() {
   try {
-    const r = JSON.parse(fs.readFileSync(RULES_FILE, 'utf8'));
+    const r = JSON.parse(fs.readFileSync(rulesFile(), 'utf8'));
     if (!r || typeof r !== 'object' || typeof r.products !== 'object' || r.products === null) throw new Error('bad schema');
     return r;
   } catch {
@@ -67,7 +70,7 @@ export function loadRules() {
 
 export function loadSkills() {
   try {
-    const s = JSON.parse(fs.readFileSync(SKILLS_FILE, 'utf8'));
+    const s = JSON.parse(fs.readFileSync(skillsFile(), 'utf8'));
     if (!Array.isArray(s?.skills) || s.skills.length === 0) throw new Error('bad schema');
     return s.skills;
   } catch {
@@ -131,6 +134,20 @@ export function extractSignals(rawText) {
   if (priceObjection && (!sig.objection || sig.objection === 'feature')) sig.objection = 'price';
   if (/(discount|sasta karo|kam karo|kam karein|chhoot|rehaan do|rehain)/.test(t)) sig.explicit_discount_request = true;
   return sig;
+}
+
+// V1-5′ H1: PRICE / COST / FINAL PRICE questions for SKUs that have an
+// owner negotiation rule must not fall through to the LLM. Detected
+// separately from extractSignals so a bare "reno16 ki price?" is a
+// catalog-authority read, not a concession session.
+export function isPriceQuery(rawText) {
+  const t = (rawText || '').toLowerCase();
+  if (/\b(price|qemat|qeemat|keemat|kimat|cost|rate)\b/.test(t)) return true;
+  if (/kitne\s*ka/.test(t)) return true;
+  if (/kitna\s*(hai|ka|hoga|he)/.test(t)) return true;
+  if (/kitni\s*(hai|price|qemat)/.test(t)) return true;
+  if (/final\s*price/.test(t)) return true;
+  return false;
 }
 
 // ── learning: derived from captured outcomes ONLY (never from LLM text) ──
@@ -224,12 +241,32 @@ export async function handleNegotiation(from, rawText, msg, customer) {
   const n0 = customer?.stateData?.negotiation;
   const isActive = Boolean(n0 && n0.active && !['CLOSED', 'LOST', 'ESCALATED'].includes(n0.state));
   const sig = extractSignals(t);
+  const priceQuery = isPriceQuery(t);
   const hasSignal = sig.asked_price !== null || sig.accept || sig.walk || sig.objection !== null || sig.explicit_discount_request;
-  if (!hasSignal && !isActive) return false;
+  if (!hasSignal && !isActive && !priceQuery) return false;
 
   let p = productFromText(t);
   if (!p && isActive) p = findProduct(n0.product);
   if (!p) return false; // no resolvable product → normal path (brain/flows)
+
+  // ── V1-5′ H1: plain price/cost question for a SKU with an owner rule
+  //     → catalog formatter owns the number. Do not open a session and
+  //     do not let the LLM become the monetary authority.
+  if (priceQuery && !hasSignal && !isActive) {
+    const rules = loadRules();
+    const rule = rules && !rules.corrupted ? rules.products?.[p.id] : null;
+    if (rule) {
+      const ev = catalogEvidence(p);
+      const sl = stockLine(p);
+      const body =
+        `📱 *${p.name}*${p.variant ? ` (${p.variant})` : ''}\n` +
+        `${priceCardLine(p)}` +
+        (sl ? `\n${sl}` : '');
+      await wa.sendText(from, body, ev ? { source: 'AI', evidence: ev } : { source: 'AI' });
+      return true;
+    }
+  }
+  if (!hasSignal && !isActive) return false;
 
   // ── authority: re-read from files EVERY turn (files are the truth) ──
   const rules = loadRules();

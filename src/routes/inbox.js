@@ -8,9 +8,14 @@ import * as auth from '../sentinel/auth.js';
 import * as conv from '../sentinel/conversations.js';
 import * as wa from '../services/whatsapp.js';
 import * as kill from '../sentinel/killswitch.js';
-import { getCustomer, recentMessages } from '../services/customers.js';
+import { getCustomer, recentMessages, statedSalesFor, confirmPaidSale, listFollowups } from '../services/customers.js';
 import { audit, auditTail } from '../sentinel/audit.js';
 import { loginPage, listPage, convoPage, errorPage } from '../inbox/views.js';
+import { qualificationOf } from '../services/qualification.js';
+import { profileOf } from '../services/profile.js';
+import { ownerSnapshot } from '../services/ops.js';
+import { opsPage } from '../inbox/opsViews.js';
+import { b2Preflight } from '../services/b2preflight.js';
 
 export const inboxRouter = express.Router();
 
@@ -47,7 +52,7 @@ function requireConversation(actor, req, res) {
   return c;
 }
 const redir = (res, phone, note) => res.redirect(`/inbox/c/${encodeURIComponent(phone)}${note ? `?note=${encodeURIComponent(note)}` : ''}`);
-const httpCode = (e) => ({ NOT_FOUND: 404, ILLEGAL_TRANSITION: 409, NOT_OWNER: 403, ALREADY_CLAIMED: 409, ACTION_ID_REQUIRED: 400 }[e.code] || 500);
+const httpCode = (e) => ({ NOT_FOUND: 404, ILLEGAL_TRANSITION: 409, NOT_OWNER: 403, ALREADY_CLAIMED: 409, ACTION_ID_REQUIRED: 400, NO_STATED_SALE: 409, EMPTY_BODY: 400 }[e.code] || 500);
 
 async function handleAction(req, res, fn, okNote) {
   const actor = requireAuth(req, res); if (!actor) return;
@@ -57,9 +62,11 @@ async function handleAction(req, res, fn, okNote) {
     conv.requireActionId(req.body?.actionId);
     const out = await fn(c, actor, req.body.actionId);
     const status = out.status || 'OK';
-    if (wantsJson(req)) return res.json({ ok: true, status, conversation: sanitize(c, out) });
+    if (wantsJson(req)) return res.json({ ok: true, status, conversation: sanitize(c, out), sale: out.sale || null });
     const note = status === 'ALREADY_APPLIED' ? 'ALREADY_APPLIED: no duplicate effect (idempotent)' :
-      status === 'ALREADY_CLAIMED' ? `ALREADY_CLAIMED by ${out.claimedBy}` : `${okNote} ✔`;
+      status === 'ALREADY_CLAIMED' ? `ALREADY_CLAIMED by ${out.claimedBy}` :
+      status === 'ALREADY_CONFIRMED' ? 'ALREADY_CONFIRMED: paid sale already recorded (no duplicate follow-up)' :
+      `${okNote} ✔`;
     return redir(res, c.phone, note);
   } catch (e) {
     if (wantsJson(req)) return res.status(httpCode(e)).json({ ok: false, error: e.code || 'ERROR', detail: String(e.message).slice(0, 120) });
@@ -90,9 +97,10 @@ inboxRouter.get('/inbox', (req, res) => {
   const actor = requireAuth(req, res); if (!actor) return;
   const list = conv.listConversations(actor.tenant).map((c) => {
     const cust = getCustomer(c.phone);
-    return { ...c, lastMessage: recentMessages(c.phone, 1)[0]?.text || '' };
+    const q = cust?.stateData?.qualification || null;
+    return { ...c, lastMessage: recentMessages(c.phone, 1)[0]?.text || '', qualification: q };
   });
-  if (wantsJson(req)) return res.json({ ok: true, conversations: list.map((c) => ({ id: c.id, phone: c.phone, state: c.state, claimedBy: c.claimedBy, unread: c.unread, reason: c.reason, slaStatus: c.slaStatus })) });
+  if (wantsJson(req)) return res.json({ ok: true, conversations: list.map((c) => ({ id: c.id, phone: c.phone, state: c.state, claimedBy: c.claimedBy, unread: c.unread, reason: c.reason, slaStatus: c.slaStatus, stage: c.qualification?.stage || null, lead_score: c.qualification?.lead_score ?? null })) });
   return res.send(listPage(actor, list, kill.peekState(), authCsrf(req)));
 });
 
@@ -100,10 +108,42 @@ inboxRouter.get('/inbox', (req, res) => {
 inboxRouter.get('/inbox/c/:phone', (req, res) => {
   const actor = requireAuth(req, res); if (!actor) return;
   const c = requireConversation(actor, req, res); if (!c) return;
-  if (wantsJson(req)) return res.json({ ok: true, conversation: c, messages: recentMessages(c.phone, 20) });
-  return res.send(convoPage(actor, c, recentMessages(c.phone, 20), authCsrf(req), req.query.err || '', req.query.note || ''));
+  const sales = statedSalesFor(c.phone);
+  const followups = listFollowups().filter((f) => f.phone === c.phone);
+  const qualification = qualificationOf(c.phone);
+  const profile = profileOf(c.phone);
+  const brief = {
+    qualification, profile, sales, followups,
+    negotiation: getCustomer(c.phone)?.stateData?.negotiation || null,
+    suppressed: conv.isSuppressed(c.phone),
+  };
+  if (wantsJson(req)) return res.json({ ok: true, conversation: c, messages: recentMessages(c.phone, 20), sales, followups, qualification, profile });
+  return res.send(convoPage(actor, c, recentMessages(c.phone, 20), authCsrf(req), req.query.err || '', req.query.note || '', sales, brief));
 });
 const authCsrf = (req) => auth.authenticate(req)?.csrf || '';
+
+
+// ── OWNER OPS (deterministic snapshot; not a live-delivery claim) ──
+inboxRouter.get('/inbox/ops', (req, res) => {
+  const actor = requireAuth(req, res); if (!actor) return;
+  if (!requireOwner(actor, req, res)) return;
+  const snap = ownerSnapshot({ tenant: actor.tenant });
+  if (wantsJson(req)) return res.json({ ok: true, snap });
+  return res.send(opsPage(actor, snap, authCsrf(req)));
+});
+inboxRouter.get('/inbox/b2', (req, res) => {
+  const actor = requireAuth(req, res); if (!actor) return;
+  if (!requireOwner(actor, req, res)) return;
+  const report = b2Preflight();
+  if (wantsJson(req)) return res.json({ ok: true, b2: report, note: 'NOT evidence of a live test' });
+  const rows = (report.checks || []).map((c) => `<tr><td>${c.id}</td><td>${c.status}</td><td>${String(c.evidence || '').slice(0, 220)}</td></tr>`).join('');
+  res.send(`<!doctype html><meta charset=utf-8><title>B-2 preflight</title>
+  <h3>B-2 preflight (code/config only)</h3>
+  <p>CURRENT TRANSPORT = ${report.current_transport} · QR = ${report.qr_session} · live delivery = ${report.live_delivery}</p>
+  <p><b>This page is NOT evidence of a live test. B-2 remains OPEN.</b></p>
+  <table border=1 cellpadding=6><tr><th>check</th><th>status</th><th>evidence</th></tr>${rows}</table>
+  <p><a href="/inbox">back</a></p>`);
+});
 
 // ── OWNER-ONLY: audit viewer (role separation proof) ──
 inboxRouter.get('/inbox/audit', (req, res) => {
@@ -129,6 +169,39 @@ inboxRouter.post('/inbox/c/:phone/return-to-ai', (req, res) =>
 
 inboxRouter.post('/inbox/c/:phone/close', (req, res) =>
   handleAction(req, res, (c, actor, actionId) => conv.closeConv(c.phone, actor, actionId), 'CLOSED'));
+
+// V1-5.1: staff marks a stated purchase as PAID. Internal business state —
+// NOT an outbound WhatsApp send. Kill switch does not apply. P2/outbox
+// are not on this path. A later Day-10 follow-up (if any) still uses the
+// existing kill/firewall/outbox send path.
+inboxRouter.post('/inbox/c/:phone/confirm-paid', (req, res) =>
+  handleAction(req, res, (c, actor, actionId) => {
+    const product = String(req.body?.product || '').trim() || undefined;
+    const at = String(req.body?.at || '').trim() || undefined;
+    const prior = statedSalesFor(c.phone);
+    const already = prior.some((r) => r.verification === 'paid'
+      && r.outcome === 'sale'
+      && (!product || r.product === product)
+      && (!at || r.at === at));
+    const rec = confirmPaidSale({
+      phone: c.phone,
+      product,
+      at,
+      staffId: actor.staffId,
+      source: 'staff',
+      actionId,
+    });
+    if (!rec) {
+      const e = new Error('NO_STATED_SALE: customer has no engine-recorded stated purchase to confirm');
+      e.code = 'NO_STATED_SALE';
+      throw e;
+    }
+    return {
+      conv: c,
+      status: already ? 'ALREADY_CONFIRMED' : 'PAID_CONFIRMED',
+      sale: { phone: rec.phone, product: rec.product, at: rec.at, verification: rec.verification, staffId: rec.sale_confirmation?.staffId },
+    };
+  }, 'PAID CONFIRMED'));
 
 // ── HUMAN REPLY (§7: outbox path only; §5 guard double-checks at chokepoint) ──
 inboxRouter.post('/inbox/c/:phone/reply', (req, res) =>

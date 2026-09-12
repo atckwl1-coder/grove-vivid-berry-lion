@@ -26,7 +26,7 @@ export function startScheduler() {
       `👥 Total customers: ${customers.length}\n` +
       `🆕 Kal active: ${newToday}\n` +
       `📦 Low stock alert: ${lowStockLine}\n` +
-      `🛡️ Quality rating: GREEN (monitoring active)\n\nAaj ka din mubarak ho! 🚀`;
+      `🛡️ Quality rating: UNAVAILABLE (Meta quality_rating is not wired — this is not a live signal)\n\nAaj ka din mubarak ho! 🚀`;
 
     log.info('Owner brief ready');
     if (config.ownerPhone) await wa.sendText(config.ownerPhone, brief).catch(() => {});
@@ -36,7 +36,7 @@ export function startScheduler() {
   cron.schedule('0 * * * *', () => {
     // TODO(phase-1): GET /{phone_number_id} quality_rating → yellow/red par
     // campaigns auto-pause + owner ko alert
-    log.info('Quality rating check (heartbeat) ✅');
+    log.info('Quality rating check skipped — Meta quality_rating not wired (UNAVAILABLE)');
   });
 
   // V1-4 (2026-09-10): post-purchase satisfaction follow-up sweep — every

@@ -28,10 +28,11 @@ import path from 'path';
 import crypto from 'crypto';
 import http from 'http';
 import { spawnSync } from 'child_process';
+import { isolateOwnerFiles } from './helpers/isolate-owner-files.mjs';
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'sentinelv14-'));
 const REPO = process.cwd();
-const PRODUCTS_FILE = path.join(REPO, 'src/data/products.json');
+const { PRODUCTS_FILE } = isolateOwnerFiles(TMP);
 
 // ── Local LLM capture double (before config import) — exists so "the LLM
 //    was available but never used for V1-4 decisions" is a real assertion ──
@@ -41,11 +42,15 @@ const llmServer = http.createServer((req, res) => {
   let body = '';
   req.on('data', (c) => { body += c; });
   req.on('end', () => {
-    llmRequests.push(JSON.parse(body));
-    replySeq += 1;
+    let parsed = null;
+    try { parsed = body ? JSON.parse(body) : null; } catch { parsed = null; }
+    if (parsed && typeof parsed === 'object') {
+      llmRequests.push(parsed);
+      replySeq += 1;
+    }
     res.setHeader('Content-Type', 'application/json');
     res.end(JSON.stringify({
-      choices: [{ message: { content: JSON.stringify({ reply: `reply-${replySeq}`, handoff: false, intent: 'general' }) } }],
+      choices: [{ message: { content: JSON.stringify({ reply: `reply-${Math.max(replySeq, 1)}`, handoff: false, intent: 'general' }) } }],
     }));
   });
 });
@@ -99,6 +104,7 @@ const mainOutbox = createOutbox({
   windowGuard: () => ({ ok: true }),
   autonomyGuard: (job) => (kill.isAutonomousJob(job) ? kill.gateForSend(job.payload?.to, { source: job.meta?.source }) : { ok: true }),
   auditFn: auditMod.audit,
+  onTerminal: (job) => fu.noteOutboxTerminal(job),
   pollMs: 15,
   retry: { maxAttempts: 3, baseMs: 20, maxMs: 80 },
 });
@@ -149,14 +155,16 @@ const sendFlow = async (phone, text) => {
   assert.ok(await waitFor(() => toPhone(phone).length > before), `reply delivered: ${text}`);
   return toPhone(phone).slice(-1)[0];
 };
-// A REAL sale the way the existing system truthfully establishes it:
-// deterministic negotiation close at the listed price (verification=customer_statement).
+// A REAL paid sale for V1-4 care: engine-recorded stated accept, THEN staff
+// confirms paid. Stated intent alone does not schedule a follow-up (V1-5′).
 const makeSale = async (phone) => {
   await sendFlow(phone, 'reno16 200000 mein hi le raha hoon, payment karta hoon');
   const rec = cust.negotiationOutcomes().filter((x) => x.phone === phone).at(-1);
   assert.equal(rec.outcome, 'sale', 'a real engine-recorded sale exists');
-  assert.equal(rec.verification, 'customer_statement', 'honest verification label (no payment system)');
-  return rec;
+  assert.equal(rec.verification, 'customer_statement', 'engine records stated intent, not payment');
+  const paid = cust.confirmPaidSale({ phone, product: rec.product, at: rec.at, staffId: 'boss' });
+  assert.equal(paid.verification, 'paid', 'staff confirmation is the qualifying purchase state');
+  return paid;
 };
 const auditAll = () => fs.readFileSync(process.env.AUDIT_FILE, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
 const auditFind = (type, extra = () => true) => auditAll().filter((e) => e.type === type && extra(e.payload || {}));
@@ -182,7 +190,14 @@ const staff = await login('boss', 'boss-pw-55');
 assert.equal(staff.status, 200);
 // The sweep is GLOBAL (one scheduler for all customers) — assertions about a
 // given sale's follow-up scope the sweep result to that sale's phone.
-const sentFor = (r, phone) => (r.sent || []).filter((id) => String(id).startsWith(`fu-${phone}-`)).length;
+const queuedFor = (r, phone) => (r.queued || []).filter((id) => String(id).startsWith(`fu-${phone}-`)).length;
+const sentFor = queuedFor; // V1-5′: sweep reports queued, never a false SENT
+const waitSubmitted = async (phone, ms = 4000) => {
+  assert.ok(await waitFor(() => {
+    const f = cust.listFollowups().find((x) => x.phone === phone);
+    return f && f.status === 'SUBMITTED';
+  }, ms), `follow-up SUBMITTED for ${phone}`);
+};
 
 function verdict(name, expected, actual, proves, noProve) {
   console.log(`\n── ${name}\n   EXPECTED        : ${expected}\n   ACTUAL          : ${actual}\n   PROVES          : ${proves}\n   DOES NOT PROVE  : ${noProve}`);
@@ -225,8 +240,8 @@ test('F2. timing is exactly Day 10: dueAt math deterministic + not due at Day 9,
   assert.equal(cust.getFollowup(f.id).status, 'SCHEDULED', 'still SCHEDULED at Day 9');
   assert.equal(toPhone(phone).filter((p) => FU_MSG.test(textOf(p))).length, 0, 'no follow-up message before due');
   const r10 = await fu.sweepFollowUps(T + 10 * 86400000);
-  assert.equal(sentFor(r10, phone), 1, 'Day 10: this follow-up sent once (no duplicates)');
-  await sleep(300);
+  assert.equal(sentFor(r10, phone), 1, 'Day 10: this follow-up queued once (no duplicates)');
+  await waitSubmitted(phone);
   const fuMsg = toPhone(phone).filter((p) => FU_MSG.test(textOf(p)));
   assert.equal(fuMsg.length, 1, 'exactly one follow-up message delivered');
   assert.equal(textOf(fuMsg[0]), 'Assalamualaikum! Aapka OPPO Reno 16 kaisa chal raha hai? 😊 Koi issue ya help chahiye ho to humein zaroor batayein.', 'owner-approved message (natural equivalent: product named)');
@@ -276,6 +291,7 @@ const outbox = createOutbox({
   windowGuard: () => ({ ok: true }),
   autonomyGuard: (job) => (kill.isAutonomousJob(job) ? kill.gateForSend(job.payload?.to, { source: job.meta?.source }) : { ok: true }),
   auditFn: auditMod.audit, pollMs: 10,
+  onTerminal: (job) => fu.noteOutboxTerminal(job),
 });
 wa.initOutbox(outbox);
 wa.setKillGate((to, meta) => kill.gateForSend(to, meta));
@@ -303,11 +319,11 @@ console.log('CHILDRESULT ' + JSON.stringify(res));
   const Ta = Date.parse(ra.at);
   await fu.sweepFollowUps(Ta);
   const ra2 = await fu.sweepFollowUps(Ta + 10 * 86400000);
-  assert.equal(sentFor(ra2, a), 1, 'parent sent it before the restart');
-  await sleep(300);
+  assert.equal(sentFor(ra2, a), 1, 'parent queued it before the restart');
+  await waitSubmitted(a);
   const logA = path.join(TMP, 'child-a.jsonl');
   const resA = runProbe(logA, Ta + 10 * 86400000);
-  assert.equal(resA.sent.filter((id) => String(id).startsWith(`fu-${a}-`)).length, 0, 'fresh process sends NOTHING for an already-SENT follow-up');
+  assert.equal(resA.queued.filter((id) => String(id).startsWith(`fu-${a}-`)).length, 0, 'fresh process queues NOTHING for an already-SUBMITTED follow-up');
   const childDelivA = fs.existsSync(logA) ? fs.readFileSync(logA, 'utf8').trim().split('\n').filter(Boolean) : [];
   assert.equal(childDelivA.filter((l) => JSON.parse(l).to === a).length, 0, 'no child delivery for phone (a)');
   cust.loadDb(); // re-sync in-memory truth from disk (as a restarted boot would)
@@ -323,7 +339,7 @@ console.log('CHILDRESULT ' + JSON.stringify(res));
   try {
     const logB = path.join(TMP, 'child-b.jsonl');
     resB = runProbe(logB, Tb + 10 * 86400000);
-    assert.equal(resB.sent.filter((id) => String(id).startsWith(`fu-${b}-`)).length, 1, 'fresh process sends the due follow-up once (no duplicates)');
+    assert.equal(resB.queued.filter((id) => String(id).startsWith(`fu-${b}-`)).length, 1, 'fresh process queues the due follow-up once (no duplicates)');
     const childDelivB = fs.readFileSync(logB, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
     assert.equal(childDelivB.filter((l) => l.to === b).length, 1, 'exactly one child delivery');
     assert.ok(FU_MSG.test(childDelivB.find((l) => l.to === b).text), 'child sent the approved message');
@@ -335,7 +351,7 @@ console.log('CHILDRESULT ' + JSON.stringify(res));
   assert.equal(sentFor(rb2, b), 0, 'old process adds NOTHING after the fresh one already sent');
   await sleep(300);
   assert.equal(toPhone(b).filter((p) => FU_MSG.test(textOf(p))).length, 0, 'nothing double-landed in the old process channel');
-  verdict('F4 restart safety', 'SENT⇒fresh process sends 0; SCHEDULED-due⇒fresh sends 1, old sends 0', `a: childSent=${resA.sent.filter((id) => String(id).startsWith('fu-' + a)).length} childDeliv=${childDelivA.filter((l) => JSON.parse(l).to === a).length}; b: childSent=${resB.sent.filter((id) => String(id).startsWith('fu-' + b)).length} old=${sentFor(rb2, b)}`, 'file-backed state (customers DB) + atomic claims survive process death — no duplicate, no loss', 'power loss mid outbox-write (the existing §17 honest-recovery semantics apply to the job itself)');
+  verdict('F4 restart safety', 'SUBMITTED⇒fresh process queues 0; SCHEDULED-due⇒fresh queues 1, old queues 0', `a: childQueued=${resA.queued.filter((id) => String(id).startsWith('fu-' + a)).length} childDeliv=${childDelivA.filter((l) => JSON.parse(l).to === a).length}; b: childQueued=${resB.queued.filter((id) => String(id).startsWith('fu-' + b)).length} old=${sentFor(rb2, b)}`, 'file-backed state (customers DB) + atomic claims survive process death — no duplicate, no loss', 'power loss mid outbox-write (the existing §17 honest-recovery semantics apply to the job itself)');
 });
 
 test('F5. duplicate scheduler invocation (×5 at due) duplicates NOTHING', async () => {
@@ -348,8 +364,9 @@ test('F5. duplicate scheduler invocation (×5 at due) duplicates NOTHING', async
     totalSent += sentFor(r, phone);
   }
   await sleep(300);
-  assert.equal(totalSent, 1, 'five due-sweeps ⇒ one send for this follow-up');
+  assert.equal(totalSent, 1, 'five due-sweeps ⇒ one queue for this follow-up');
   assert.equal(cust.listFollowups().filter((x) => x.phone === phone).length, 1, 'no re-creation from re-derivation');
+  await waitSubmitted(phone);
   assert.equal(toPhone(phone).filter((p) => FU_MSG.test(textOf(p))).length, 1, 'customer got exactly one');
   verdict('F5 duplicate invocation', '5 sweeps at due ⇒ 1 send, 1 record, 1 message', `sent=${totalSent} records=1`, 'status lifecycle (SCHEDULED→SENT terminal) + the existing claim are both idempotent', 'two simultaneous live processes racing the same Q dir (single-writer assumption of this deployment; outbox claim is atomic per job)');
 });
@@ -468,7 +485,7 @@ test('F11. positive replies close the follow-up naturally (3 canonical phrases �
     const T = Date.parse(rec.at);
     await fu.sweepFollowUps(T);
     await fu.sweepFollowUps(T + 10 * 86400000);
-    await sleep(300);
+    await waitSubmitted(phone);
     assert.equal(toPhone(phone).filter((p) => FU_MSG.test(textOf(p))).length, 1, `follow-up out for "${phrase}"`);
     const before = toPhone(phone).length;
     await sendFlow(phone, phrase);
@@ -491,7 +508,7 @@ test('F12. issue replies reach the EXISTING support/escalation flow (no diagnosi
     const T = Date.parse(rec.at);
     await fu.sweepFollowUps(T);
     await fu.sweepFollowUps(T + 10 * 86400000);
-    await sleep(300);
+    await waitSubmitted(phone);
     const before = toPhone(phone).length;
     await sendFlow(phone, phrase);
     await sleep(250);
@@ -530,8 +547,8 @@ test('F15. repeated no-response creates NO uncontrolled recurring sends (Day 10 
   const rec = await makeSale(phone);
   const T = Date.parse(rec.at);
   await fu.sweepFollowUps(T);
-  await fu.sweepFollowUps(T + 10 * 86400000); // the ONE follow-up
-  await sleep(300);
+  await fu.sweepFollowUps(T + 10 * 86400000);
+  await waitSubmitted(phone);
   assert.equal(toPhone(phone).filter((p) => FU_MSG.test(textOf(p))).length, 1);
   await fu.sweepFollowUps(T + 20 * 86400000); // customer never replied — Day 20
   await fu.sweepFollowUps(T + 30 * 86400000); // Day 30
@@ -539,7 +556,7 @@ test('F15. repeated no-response creates NO uncontrolled recurring sends (Day 10 
   await sleep(300);
   assert.equal(toPhone(phone).filter((p) => FU_MSG.test(textOf(p))).length, 1, 'still exactly one follow-up after weeks of silence');
   assert.equal(cust.listFollowups().filter((x) => x.phone === phone).length, 1, 'no reminder record was ever created');
-  assert.equal(cust.listFollowups().find((x) => x.phone === phone).status, 'SENT', 'stays SENT (terminal) — no re-arming');
+  assert.equal(cust.listFollowups().find((x) => x.phone === phone).status, 'SUBMITTED', 'stays SUBMITTED (terminal) — no re-arming');
   verdict('F15 no chasing', 'one follow-up per purchase; silence is respected at Day 20/30/60', '1 message, 1 record, terminal SENT', 'the no-recurrent-spam rule is structural (terminal status), not a rate limit that could be retuned', 'a deliberate owner decision to add a reminder later (not in this contract — nothing pre-built for it)');
 });
 
@@ -581,7 +598,7 @@ test('F17. the LLM is not on the V1-4 decision path (available via double, used 
   const T = Date.parse(rec.at);
   await fu.sweepFollowUps(T);
   await fu.sweepFollowUps(T + 10 * 86400000);      // authorization + timing + send decision
-  await sleep(300);
+  await waitSubmitted(phone);
   assert.equal(toPhone(phone).filter((p) => FU_MSG.test(textOf(p))).length, 1);
   await sendFlow(phone, 'bilkul theek');      // close decision
   await sleep(200);
@@ -589,7 +606,7 @@ test('F17. the LLM is not on the V1-4 decision path (available via double, used 
   const rec2 = await makeSale(p2);
   const T2 = Date.parse(rec2.at);
   await fu.sweepFollowUps(T2 + 10 * 86400000);     // (schedules its own + sends this due one)
-  await sleep(300);
+  await waitSubmitted(p2);
   await sendFlow(p2, 'camera problem');      // issue classification + escalation decision
   await sleep(200);
   assert.equal(llmRequests.length, llmBefore, 'ZERO LLM calls across schedule/send/close/escalate');

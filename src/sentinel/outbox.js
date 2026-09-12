@@ -17,6 +17,7 @@ export function createOutbox({
   windowGuard = () => ({ ok: true }),
   autonomyGuard = () => ({ ok: true }), // CAP-055: kill-switch execute-layer gate
   auditFn = () => {},
+  onTerminal = () => {}, // V1-5′: follow-up (and others) observe provider-terminal states
   pollMs = 2000,
   retry = { maxAttempts: 5, baseMs: 1500, maxMs: 30000 },
 }) {
@@ -29,7 +30,12 @@ export function createOutbox({
   const safeRead = (p) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; } };
   const list = (d) => fs.readdirSync(d).filter((f) => f.endsWith('.json'));
   const existsFinal = (f) => fs.existsSync(path.join(D, f)) || fs.existsSync(path.join(F, f));
+  const emitTerminal = (job) => {
+    try { onTerminal(job); } catch { /* observers must never break the worker */ }
+  };
 
+  // Persistence only. Does not inspect body/amounts (DEBT-07 lives
+  // in numberFirewall + brain.deliverModelOutput, before this layer).
   function enqueue(payload, meta = {}) {
     const id = 'job-' + Date.now().toString(36) + '-' + crypto.randomBytes(4).toString('hex');
     const job = {
@@ -86,6 +92,7 @@ export function createOutbox({
     if (!gate.ok) {
       finalize(F, f, sf, { ...job, status: 'DLQ', dlqReason: gate.reason, failedAt: new Date().toISOString() });
       auditFn('OUTBOX_DLQ', { id: job.id, reason: gate.reason });
+      emitTerminal({ ...job, status: 'DLQ', dlqReason: gate.reason });
       return;
     }
 
@@ -99,6 +106,7 @@ export function createOutbox({
       if (job.attempts >= retry.maxAttempts) {
         finalize(F, f, sf, { ...job, status: 'DLQ', dlqReason: 'max_attempts', failedAt: new Date().toISOString() });
         auditFn('OUTBOX_DLQ', { id: job.id, reason: 'max_attempts', attempts: job.attempts });
+        emitTerminal({ ...job, status: 'DLQ', dlqReason: 'max_attempts', attempts: job.attempts });
       } else {
         job.status = 'RETRY_SCHEDULED';
         job.nextAttemptAt = Date.now() + Math.min(retry.maxMs, retry.baseMs * 2 ** (job.attempts - 1));
@@ -113,14 +121,18 @@ export function createOutbox({
     // Provider ko ek dafa message ja chuka ho to dubara bhejna = duplicate side effect.
     // Honest state: SENT_WITH_AUDIT_GAP — retry nahi. (audit-first hardening, Phase-2A lesson)
     try {
-      finalize(D, f, sf, {
+      const finalJob = {
         ...job, status: 'SENT', sentAt: new Date().toISOString(),
         providerResult: summarize(result),
-      });
+      };
+      finalize(D, f, sf, finalJob);
       auditFn('OUTBOX_SENT', { id: job.id, to: job.payload?.to, attempts: job.attempts });
+      emitTerminal(finalJob);
     } catch (bookErr) {
       try {
-        finalize(D, f, sf, { ...job, status: 'SENT_WITH_AUDIT_GAP', gapNote: String(bookErr?.message || bookErr).slice(0, 200) });
+        const gapJob = { ...job, status: 'SENT_WITH_AUDIT_GAP', gapNote: String(bookErr?.message || bookErr).slice(0, 200) };
+        finalize(D, f, sf, gapJob);
+        emitTerminal(gapJob);
       } catch { /* job already caught below */ }
       try {
         auditFn('OUTBOX_BOOKKEEPING_ERROR', { id: job.id, error: String(bookErr?.message || bookErr).slice(0, 200) });
@@ -153,6 +165,7 @@ export function createOutbox({
       atomicWriteJson(path.join(Q, f), job);
       fs.rmSync(path.join(S, f), { force: true });
       auditFn('OUTBOX_RECOVERY_REQUEUED_UNCERTAIN', { id: job.id });
+      emitTerminal(job);
     }
   }
 

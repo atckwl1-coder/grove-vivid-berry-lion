@@ -10,11 +10,20 @@ export function readJson(file, fallback) {
   }
 }
 
-// Crash-safe: write temp then atomic rename (same-filesystem guarantee)
+// Crash-safe: write temp, fsync, then atomic rename (same-filesystem guarantee).
+// A crash mid-write leaves the previous complete file in place; the dest is
+// never a truncated JSON document.
 export function atomicWriteJson(file, obj) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2));
+  const data = JSON.stringify(obj, null, 2);
+  const fd = fs.openSync(tmp, 'w');
+  try {
+    fs.writeFileSync(fd, data);
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
   fs.renameSync(tmp, file);
 }
 

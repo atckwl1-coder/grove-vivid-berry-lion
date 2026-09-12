@@ -65,8 +65,30 @@ let killGate = null;
 export function setKillGate(fn) { killGate = fn; } // kept for CAP-055 wiring compat; firewall does the kill check authoritatively
 
 // ── The ONLY send path in the whole system ──
+//
+// P2 FIREWALL is the action-class chokepoint (kill/identity/authz/
+// evidence/policy/idempotency). It does NOT inspect message bodies
+// or monetary amounts.
+//
+// DEBT-07 number firewall is NOT here and is NOT in outbox.enqueue.
+// Putting validateMonetaryReply on every AI send would reject
+// legitimate deterministic copy (customer-stated EMI principals
+// such as "emi 85000 6", which are not catalog prices).
+//
+// Model-generated customer-facing text must enter via
+// brain.deliverModelOutput / pacedBrainSend, which run the
+// validator and tag origin=MODEL_OUTPUT + monetaryValidated.
+// A caller that sendTexts LLM/vision copy without that origin is
+// a contract violation this transport cannot distinguish from
+// catalog/EMI/negotiation copy. That limitation is accepted
+// rather than coupling content validation into P2/outbox.
 async function send(payload, meta = { source: 'AI' }) {
   if (!outbox) throw new Error('Sentinel: outbound dispatcher not initialized');
+  if (meta.origin === 'MODEL_OUTPUT' && meta.monetaryValidated !== true) {
+    const e = new Error('MODEL_OUTPUT_NOT_VALIDATED');
+    e.code = 'MODEL_OUTPUT_NOT_VALIDATED';
+    throw e;
+  }
   // ▓▓ P2 FIREWALL — every send evaluates HERE, before anything is queued ▓▓
   const decision = firewall.evaluate({
     class: meta.class,

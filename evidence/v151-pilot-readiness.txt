@@ -1,0 +1,59 @@
+V1-5.1 CONTROLLED PILOT READINESS — verification evidence
+Date: 2026-09-12
+Runner: node scripts/run-tests.mjs (sequential per-file, two consecutive processes)
+
+FOCUSED
+  tests/v151pilot.test.js  18/18
+  tests/v15safety.test.js  34/34  (includes NF16 CROSS_SKU_AMOUNT)
+
+FULL SUITE ×2
+  RUN 1  files=13 pass=241 fail=0
+  RUN 2  files=13 pass=241 fail=0
+
+Per-file (both runs identical counts):
+  cap008.test.js                 19
+  cap055.test.js                 14
+  humanpaced.test.js             34
+  p2firewall.test.js             16
+  phase2a.test.js                10
+  phase2a1.remediation.test.js    8
+  v11memory.test.js              12
+  v12authority.test.js           16
+  v13negotiation.test.js         32
+  v14followup.test.js            17
+  v151pilot.test.js              18
+  v15safety.test.js              34
+  v1truth.test.js                11
+  TOTAL                         241
+
+Owner files sha256 (byte-identical to shipped):
+  src/data/products.json            2f10d77e0d1f3b1b3cb81fa43c9da2c376ab213bfc8e0570b7ede56a4b5dd8ea
+  src/data/negotiation-rules.json   c4414e14e890214da583aa6ca4bd7e6d888b48a9ae470321fdc65094e9eb6e61
+  src/data/sales-skills.json        18841306ab7ae761489b00eac2c3771e690622294dc5ee02e7216ddfec6c236b
+
+Floors:
+  reno16.floor        = 186800  RESOLVED
+  reno16f.floor       = null    UNRESOLVED
+
+Transport:
+  CURRENT TRANSPORT = Meta Cloud API
+  QR / SESSION      = NOT IMPLEMENTED
+  D-010             = decision record only (not imported by src/)
+
+Checks from the V1-5.1 matrix (all asserted in v151pilot / v15safety):
+  1  focused + full suite green ×2
+  4  owner JSON byte-identical
+  5  Reno 16 floor 186800
+  6  Reno 16F unresolved
+  7  ASCII Rs. 180,000 model output rejected
+  8  Unicode equivalent 180000 rejected (Arabic-Indic / Eastern-Arabic / fullwidth / ZWSP)
+  9  deterministic EMI 85000 6 still sends
+ 10  staff paid confirmation authenticated + CSRF + tenant + auditable
+ 11  duplicate paid confirmation → one follow-up
+ 12  customer statement alone cannot create paid
+ 13  no QR/session code in src/
+ 14  docs still say Meta Cloud API
+ 15  D-010 is a preflight record, not an adapter
+
+NOT proven: live Meta delivery (B-2), a real PSP settlement, full SKU-bound allow-list,
+multilingual money NLP, POS integration, internet-exposed inbox (DEBT-19).

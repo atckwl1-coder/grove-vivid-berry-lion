@@ -1,0 +1,20 @@
+V1-5′ suite evidence 2026-09-11
+run1: 12 files 217/217 exit 0
+run2: 12 files 217/217 exit 0
+shipped catalog STALE vs wall clock (~25h for reno16/16F); v13 still 32/32 via CATALOG_NOW_MS
+owner sha256 unchanged:
+  products.json 2f10d77e0d1f3b1b3cb81fa43c9da2c376ab213bfc8e0570b7ede56a4b5dd8ea
+  negotiation-rules.json c4414e14e890214da583aa6ca4bd7e6d888b48a9ae470321fdc65094e9eb6e61
+  sales-skills.json 18841306ab7ae761489b00eac2c3771e690622294dc5ee02e7216ddfec6c236b
+reno16 floor 186800 RESOLVED; reno16f UNRESOLVED
+# duration_ms 215.423181
+
+════════════════════════════════════════════════════════════
+# SUITE TOTAL: files=12 pass=217 fail=0
+════════════════════════════════════════════════════════════
+--- run2 ---
+# duration_ms 200.670165
+
+════════════════════════════════════════════════════════════
+# SUITE TOTAL: files=12 pass=217 fail=0
+════════════════════════════════════════════════════════════

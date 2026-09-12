@@ -46,11 +46,15 @@ const llmServer = http.createServer((req, res) => {
   let body = '';
   req.on('data', (c) => { body += c; });
   req.on('end', () => {
-    llmRequests.push(JSON.parse(body));
-    replySeq += 1;
+    let parsed = null;
+    try { parsed = body ? JSON.parse(body) : null; } catch { parsed = null; }
+    if (parsed && typeof parsed === 'object') {
+      llmRequests.push(parsed);
+      replySeq += 1;
+    }
     res.setHeader('Content-Type', 'application/json');
     res.end(JSON.stringify({
-      choices: [{ message: { content: JSON.stringify({ reply: `reply-${replySeq}`, handoff: false, intent: 'general' }) } }],
+      choices: [{ message: { content: JSON.stringify({ reply: `reply-${Math.max(replySeq, 1)}`, handoff: false, intent: 'general' }) } }],
     }));
   });
 });

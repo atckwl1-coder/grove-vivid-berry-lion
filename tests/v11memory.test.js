@@ -34,9 +34,11 @@ import path from 'path';
 import crypto from 'crypto';
 import http from 'http';
 import { spawnSync } from 'child_process';
+import { isolateOwnerFiles } from './helpers/isolate-owner-files.mjs';
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'sentinelv11-'));
 const REPO = process.cwd();
+const { PRODUCTS_FILE } = isolateOwnerFiles(TMP);
 
 // ── Local LLM capture double (before config import — ESM hoisting) ──
 const llmRequests = [];
@@ -45,11 +47,15 @@ const llmServer = http.createServer((req, res) => {
   let body = '';
   req.on('data', (c) => { body += c; });
   req.on('end', () => {
-    llmRequests.push(JSON.parse(body));
-    replySeq += 1;
+    let parsed = null;
+    try { parsed = body ? JSON.parse(body) : null; } catch { parsed = null; }
+    if (parsed && typeof parsed === 'object') {
+      llmRequests.push(parsed);
+      replySeq += 1;
+    }
     res.setHeader('Content-Type', 'application/json');
     res.end(JSON.stringify({
-      choices: [{ message: { content: JSON.stringify({ reply: `reply-${replySeq}`, handoff: false, intent: 'general' }) } }],
+      choices: [{ message: { content: JSON.stringify({ reply: `reply-${Math.max(replySeq, 1)}`, handoff: false, intent: 'general' }) } }],
     }));
   });
 });
@@ -107,7 +113,6 @@ const D = '923001110024';
 // V1-2 fixture: owner-just-verified catalog (observed_at=now) so this suite's
 // EMI assertion ('EMI Plan') sees VERIFIED price data; shipped file restored in
 // teardown. (Authority states themselves are v12authority.test.js's job.)
-const PRODUCTS_FILE = path.join(REPO, 'src/data/products.json');
 const originalCatalog = fs.readFileSync(PRODUCTS_FILE, 'utf8');
 {
   const c = JSON.parse(originalCatalog);
@@ -318,7 +323,7 @@ test('M11. fresh process reading the same DB file → identical bounded context'
 });
 
 // ═══ M12. Corrupt / missing memory fails safely (established storage semantics) ═══
-test('M12. corrupt DB file → [] (no crash); missing DB file → [] (no crash)', async () => {
+test('M12. corrupt DB file → fail-closed throw; missing DB file → [] (fresh start)', async () => {
   const corruptFile = path.join(TMP, 'corrupt-db.json');
   fs.writeFileSync(corruptFile, 'NOT{{JSON');
   const child = (dbFile) => `
@@ -326,17 +331,16 @@ test('M12. corrupt DB file → [] (no crash); missing DB file → [] (no crash)'
     import(${JSON.stringify(path.join(REPO, 'src/services/customers.js'))}).then((m) => {
       m.loadDb();
       process.stdout.write(JSON.stringify(m.recentConversation(${JSON.stringify(D)}, 12)));
-    }).catch((e) => { process.stderr.write('THROW:' + e.message); process.exit(3); });
+    }).catch((e) => { process.stderr.write('THROW:' + (e.code || '') + ':' + e.message); process.exit(3); });
   `;
-  for (const [label, file] of [['corrupt', corruptFile], ['missing', path.join(TMP, 'nope', 'missing.json')]]) {
-    const r = spawnSync(process.execPath, ['-e', child(file)], { encoding: 'utf8', timeout: 30000 });
-    assert.equal(r.status, 0, `${label}: child exited cleanly (stderr: ${r.stderr || 'none'})`);
-    // loadDb's established behavior prints "DB corrupt ya missing — fresh start"
-    // to stdout on the corrupt path — the JSON context is the LAST line.
-    const jsonLine = r.stdout.trim().split('\n').pop();
-    assert.equal(jsonLine, '[]', `${label}: context safely empty (established fresh-start semantics)`);
-  }
-  verdict('M12 corrupt/missing memory', 'both → [] without crash', 'asserted', 'malformed/missing memory fails safely per repo storage semantics (fresh start); conversation continues with empty history', 'auto-repair of corrupt files (not an established repo behavior)');
+  const corrupt = spawnSync(process.execPath, ['-e', child(corruptFile)], { encoding: 'utf8', timeout: 30000 });
+  assert.notEqual(corrupt.status, 0, 'corrupt DB refuses to start');
+  assert.ok(/CUSTOMER_DB_CORRUPT/.test(corrupt.stderr || ''), 'fail-closed error code');
+  const missing = spawnSync(process.execPath, ['-e', child(path.join(TMP, 'nope', 'missing.json'))], { encoding: 'utf8', timeout: 30000 });
+  assert.equal(missing.status, 0, 'missing DB is a legitimate fresh start');
+  const jsonLine = missing.stdout.trim().split('\n').pop();
+  assert.equal(jsonLine, '[]', 'missing: context safely empty');
+  verdict('M12 corrupt/missing memory', 'corrupt → throw fail-closed; missing → []', 'asserted', 'V1-5′: corrupt DB never silently wipes; missing file is a first-boot fresh start', 'auto-repair of corrupt files (not an established repo behavior)');
 });
 
 // ── teardown ─

@@ -21,7 +21,8 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-const FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), '../src/data/products.json');
+const DEFAULT_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), '../src/data/products.json');
+const FILE = process.env.CATALOG_FILE || DEFAULT_FILE;
 const TTL_MS = 24 * 60 * 60 * 1000;
 const JUMP_THRESHOLD = 0.25; // CAP-003: human_approval_required "on >25% price jump in file edit"
 

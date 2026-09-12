@@ -15,8 +15,9 @@
 //  outbox spy. LLM = LOCAL capture double (prompt-rule assertions only —
 //  the numeric path is the deterministic router/engine, no LLM).
 //  Each test uses a UNIQUE customer phone (clean per-test negotiation
-//  state). Catalog/rules/skills states are exercised by patching the real
-//  files (restored in teardown / per-test finally).
+//  state). Catalog/rules/skills states are exercised on TEMPORARY copies
+//  (CATALOG_FILE / NEGOTIATION_RULES_FILE / SALES_SKILLS_FILE). The shipped
+//  owner files are never written. Time is injected (CATALOG_NOW_MS).
 // ═══════════════════════════════════════════════════════════
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -25,12 +26,14 @@ import os from 'os';
 import path from 'path';
 import crypto from 'crypto';
 import http from 'http';
+import { isolateOwnerFiles } from './helpers/isolate-owner-files.mjs';
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'sentinelv13-'));
 const REPO = process.cwd();
-const PRODUCTS_FILE = path.join(REPO, 'src/data/products.json');
-const RULES_FILE = path.join(REPO, 'src/data/negotiation-rules.json');
-const SKILLS_FILE = path.join(REPO, 'src/data/sales-skills.json');
+// Frozen clock: shipped reno16/16F observed_at is 2026-09-10T10:00Z — VERIFIED
+// at this instant regardless of wall-clock age. N5 restore cannot poison later tests.
+const FROZEN_NOW = Date.parse('2026-09-10T12:00:00.000Z');
+const { PRODUCTS_FILE, RULES_FILE, SKILLS_FILE } = isolateOwnerFiles(TMP, { nowMs: FROZEN_NOW });
 
 // ── Local LLM capture double (before config import) ──
 const llmRequests = [];
@@ -39,11 +42,15 @@ const llmServer = http.createServer((req, res) => {
   let body = '';
   req.on('data', (c) => { body += c; });
   req.on('end', () => {
-    llmRequests.push(JSON.parse(body));
-    replySeq += 1;
+    let parsed = null;
+    try { parsed = body ? JSON.parse(body) : null; } catch { parsed = null; }
+    if (parsed && typeof parsed === 'object') {
+      llmRequests.push(parsed);
+      replySeq += 1;
+    }
     res.setHeader('Content-Type', 'application/json');
     res.end(JSON.stringify({
-      choices: [{ message: { content: JSON.stringify({ reply: `reply-${replySeq}`, handoff: false, intent: 'general' }) } }],
+      choices: [{ message: { content: JSON.stringify({ reply: `reply-${Math.max(replySeq, 1)}`, handoff: false, intent: 'general' }) } }],
     }));
   });
 });
@@ -112,8 +119,8 @@ const restoreAll = () => {
 };
 const hash = (f) => crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex');
 
-// fixture: owner just verified the Reno rows (deterministic fresh state)
-patchCat((c) => { for (const id of ['reno16', 'reno16f']) { const p = c.products.find((x) => x.id === id); p.observed_at = new Date().toISOString(); } });
+// Freshness is owned by CATALOG_NOW_MS + the shipped observed_at on the copy.
+// Do NOT stamp wall-clock now onto the copy (that is what made N5 poison the suite).
 
 const sign = (body) => 'sha256=' + crypto.createHmac('sha256', 'testsecret-v13').update(body).digest('hex');
 let seq = 0;
@@ -219,7 +226,7 @@ test('N4. malformed floor → NO concession, honest staff path, no new numbers',
 
 test('N5. missing floor (product not in rules) → no autonomous discount', async () => {
   const phone = P();
-  patchCat((c) => { c.products.find((x) => x.id === 'a3x').observed_at = new Date().toISOString(); });
+  patchCat((c) => { c.products.find((x) => x.id === 'a3x').observed_at = new Date(FROZEN_NOW).toISOString(); });
   try {
     const r = await sendFlow(phone, 'a3x sasta karo');
     const t = textOf(r);

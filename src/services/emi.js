@@ -1,8 +1,23 @@
 // EMI / Installment Wizard — 3% monthly service charge (store policy)
 import { formatPrice } from './catalog.js';
 
-export function emiPlanFor(price, months = 6, monthlyRate = 0.03) {
-  const allowed = [3, 6, 9, 12];
+export const EMI_MONTHS = [3, 6, 9, 12];
+export const EMI_MONTHLY_RATE = 0.03;
+
+export function emiNumericSet(price, monthlyRate = EMI_MONTHLY_RATE) {
+  const set = new Set();
+  if (typeof price !== 'number' || !Number.isFinite(price) || price <= 0) return set;
+  set.add(Math.round(price));
+  for (const m of EMI_MONTHS) {
+    const t = price * (1 + monthlyRate * m);
+    set.add(Math.round(t));
+    set.add(Math.round(t / m));
+  }
+  return set;
+}
+
+export function emiPlanFor(price, months = 6, monthlyRate = EMI_MONTHLY_RATE) {
+  const allowed = EMI_MONTHS;
   if (!allowed.includes(months)) months = 6;
 
   // Simple flat service-charge model (asli calc store policy ke mutabiq hogi)

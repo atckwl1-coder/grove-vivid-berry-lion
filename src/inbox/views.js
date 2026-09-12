@@ -1,6 +1,8 @@
 // ─────────────────────────────────────────────────────────────
 //  CAP-008 §13 — SMALLEST FUNCTIONAL INBOX UI (server-rendered, inline CSS, no JS frameworks)
 // ─────────────────────────────────────────────────────────────
+import { crmBriefHtml } from './brief.js';
+
 const css = `
 body{font-family:system-ui,sans-serif;margin:0;background:#f4f5f7;color:#1f2937}
 header{background:#075E54;color:#fff;padding:10px 16px;display:flex;gap:14px;align-items:center}
@@ -28,7 +30,7 @@ const slaBadge = (c) => {
   if (c.slaStatus === 'BREACHED') return '<span class="sla-bad">🔥 BREACHED</span>';
   if (c.slaStatus === 'RESOLVED') return '<span class="sla-ok">✅ RESOLVED</span>';
   const left = Date.parse(c.slaDeadline) - Date.now();
-  return left < 60000 ? '<span class="sla-soon">⏳ &lt;1m</span>' : `<span class="sla-ok">✅ ${Math.ceil(left / 60000)}m left</span>`;
+  return left < 60000 ? '<span class="sla-soon">⏳ <1m</span>' : `<span class="sla-ok">✅ ${Math.ceil(left / 60000)}m left</span>`;
 };
 const page = (title, actor, body) => `<!doctype html><meta charset=utf-8><title>${esc(title)} · NOOR Inbox</title><style>${css}</style>
 <header><b>🌙 NOOR Human Inbox</b><span>${esc(actor.staffId)} · ${esc(actor.role)} · tenant:${esc(actor.tenant)}</span>
@@ -64,10 +66,10 @@ export function listPage(actor, convs, killState = { state: 'AUTOMATION_ACTIVE' 
   return page('Inbox', actor, `${banner}${err ? `<div class=err>${esc(err)}</div>` : ''}
 <h3>Conversations (${convs.length})</h3>
 <table><tr><th>Customer</th><th>Last</th><th>State</th><th>Assigned</th><th>Reason</th><th>SLA</th></tr>${rows || '<tr><td colspan=6>No escalations yet.</td></tr>'}</table>
-<p class=tag>Auto-sort: QUEUED first, then unread count, then SLA pressure.</p>`);
+${actor.role === 'OWNER' ? '<p><a href="/inbox/ops">Owner ops</a> · <a href="/inbox/b2">B-2 preflight</a></p>' : ''}<p class=tag>Auto-sort: QUEUED first, then unread count, then SLA pressure.</p>`);
 }
 
-export function convoPage(actor, conv, msgs, csrf, err = '', info = '') {
+export function convoPage(actor, conv, msgs, csrf, err = '', info = '', sales = [], brief = {}) {
   const msgsHtml = msgs.map((m) => {
     const cls = m.dir === 'in' ? 'm-in' : m.source === 'HUMAN' ? 'm-staff' : 'm-bot';
     const tag = m.dir === 'in' ? `[CUSTOMER MESSAGE]` : m.source === 'HUMAN' ? `[STAFF • ${esc(m.staffId || '?')}]` : '[BOT]';
@@ -91,6 +93,25 @@ export function convoPage(actor, conv, msgs, csrf, err = '', info = '') {
     <form class=inline method=post action="/inbox/c/${encodeURIComponent(conv.phone)}/unclaim">
       <input type=hidden name=csrf value="${esc(csrf)}"><input type=hidden name=actionId value="${actionId()}">
       <button class=ghost>↩ Unclaim</button></form>` : '';
+  const latestSale = [...(sales || [])].reverse()[0] || null;
+  const paidAlready = (sales || []).some((s) => s.verification === 'paid');
+  const salesRows = (sales || []).map((s) =>
+    `<div>${esc(s.product || '?')} · ${esc(s.verification || '—')} · ${esc(s.at || '')}${s.sale_confirmation?.staffId ? ` · by ${esc(s.sale_confirmation.staffId)}` : ''}</div>`
+  ).join('') || '<div class=tag>No stated purchase on this customer.</div>';
+  const paidForm = latestSale ? `
+    <form method=post action="/inbox/c/${encodeURIComponent(conv.phone)}/confirm-paid">
+      <input type=hidden name=csrf value="${esc(csrf)}"><input type=hidden name=actionId value="${actionId()}">
+      <input type=hidden name=product value="${esc(latestSale.product || '')}">
+      <input type=hidden name=at value="${esc(latestSale.at || '')}">
+      <button ${paidAlready ? 'disabled' : ''}>${paidAlready ? 'Already PAID' : 'Mark as PAID (staff-confirmed)'}</button>
+    </form>
+    <p class=tag>This records store-confirmed payment. It is not a payment gateway. It does not send WhatsApp. Day-10 care uses this flag.</p>` : '<p class=tag>No stated purchase to confirm. Customer must accept a price on the negotiation path first.</p>';
+  const paidPanel = `
+    <div class=facts>
+      <b>PAID SALE (internal — not WhatsApp, not a PSP)</b>
+      ${salesRows}
+      ${paidForm}
+    </div>`;
   const returnBtn = conv.state === 'RESOLVED' ? `
     <form method=post action="/inbox/c/${encodeURIComponent(conv.phone)}/return-to-ai">
       <input type=hidden name=csrf value="${esc(csrf)}"><input type=hidden name=actionId value="${actionId()}">
@@ -111,6 +132,8 @@ resolved_at: ${esc(conv.resolvedAt || '—')} · sla_deadline: ${esc(conv.slaDea
 ${conv.aiInference ? `<br><b>AI INFERENCE (ESTIMATED — NOT FACT):</b> ${esc(JSON.stringify(conv.aiInference)).slice(0, 200)}` : ''}
 </div>
 ${claimBtn}
+${crmBriefHtml(brief || {})}
+${paidPanel}
 ${msgsHtml}
 ${humanTools}
 ${returnBtn}

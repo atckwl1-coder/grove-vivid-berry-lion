@@ -1,0 +1,43 @@
+V1-6 RAPID FEATURE INTEGRATION — evidence pin
+Date: 2026-09-12
+Status: DEMO/PILOT. NOT VERIFIED_PRODUCTION. B-2 OPEN.
+
+Suite (sequential per-file, two consecutive processes):
+  RUN 1  SUITE TOTAL: files=19 pass=292 fail=0
+  RUN 2  SUITE TOTAL: files=19 pass=292 fail=0
+
+Focused V1-6:
+  v16qualify.test.js  15
+  v16profile.test.js   9
+  v16compare.test.js   7
+  v16ops.test.js       5
+  v16b2.test.js        6
+  v16crm.test.js       9
+  = 51 new
+
+Owner sha256 (unchanged):
+  src/data/products.json            2f10d77e0d1f3b1b3cb81fa43c9da2c376ab213bfc8e0570b7ede56a4b5dd8ea
+  src/data/negotiation-rules.json   c4414e14e890214da583aa6ca4bd7e6d888b48a9ae470321fdc65094e9eb6e61
+  src/data/sales-skills.json        18841306ab7ae761489b00eac2c3771e690622294dc5ee02e7216ddfec6c236b
+
+Floors:
+  reno16.floor = 186800  floor_status = RESOLVED
+  reno16f.floor = None   floor_status = UNRESOLVED
+
+Transport:
+  CURRENT TRANSPORT = Meta Cloud API
+  QR / SESSION = NOT IMPLEMENTED
+  live delivery = IMPLEMENTED BUT UNPROVEN
+  b2Preflight() and B2_LIVE_SMOKE_CHECKLIST.md are NOT live evidence.
+
+Integration regressions fixed this cycle (not test deletions):
+  M4  recommend regex no longer matches a bare "mera budget …" (LLM isolation path restored)
+  T1  src/inbox/opsViews.js no longer contains banned transport-client tokens
+
+Safety files not redesigned this cycle:
+  src/sentinel/firewall.js
+  src/sentinel/killswitch.js
+  src/sentinel/conversations.js (FSM)
+  src/sentinel/outbox.js (architecture)
+  src/sentinel/numberFirewall.js
+  owner JSON files
