@@ -11,7 +11,7 @@ import * as kill from '../sentinel/killswitch.js';
 import { getCustomer, recentMessages, statedSalesFor, confirmPaidSale, listFollowups, unpaidStatedSales } from '../services/customers.js';
 import { audit, auditTail } from '../sentinel/audit.js';
 import { loginPage, listPage, convoPage, errorPage } from '../inbox/views.js';
-import { qualificationOf } from '../services/qualification.js';
+import { qualificationOf, listQueuedLeads } from '../services/qualification.js';
 import { profileOf } from '../services/profile.js';
 import { ownerSnapshot } from '../services/ops.js';
 import { opsPage } from '../inbox/opsViews.js';
@@ -115,8 +115,15 @@ inboxRouter.get('/inbox', (req, res) => {
     const q = cust?.stateData?.qualification || null;
     return { ...c, lastMessage: recentMessages(c.phone, 1)[0]?.text || '', qualification: q };
   });
-  if (wantsJson(req)) return res.json({ ok: true, conversations: list.map((c) => ({ id: c.id, phone: c.phone, state: c.state, claimedBy: c.claimedBy, unread: c.unread, reason: c.reason, slaStatus: c.slaStatus, stage: c.qualification?.stage || null, lead_score: c.qualification?.lead_score ?? null })) });
-  return res.send(listPage(actor, list, kill.peekState(), authCsrf(req), req.query.err || '', req.query.note || '', unpaidStatedSales()));
+  const leads = String(actor.tenant || '') === String(config.tenantId || '') ? listQueuedLeads() : [];
+  if (wantsJson(req)) {
+    return res.json({
+      ok: true,
+      conversations: list.map((c) => ({ id: c.id, phone: c.phone, state: c.state, claimedBy: c.claimedBy, unread: c.unread, reason: c.reason, slaStatus: c.slaStatus, stage: c.qualification?.stage || null, lead_score: c.qualification?.lead_score ?? null })),
+      leads,
+    });
+  }
+  return res.send(listPage(actor, list, kill.peekState(), authCsrf(req), req.query.err || '', req.query.note || '', unpaidStatedSales(), leads));
 });
 
 // ── CONVERSATION VIEW (§6 context + §13) ──

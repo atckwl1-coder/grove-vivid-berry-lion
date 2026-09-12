@@ -7,7 +7,7 @@
 // ─────────────────────────────────────────────────────────────
 import {
   getCustomer, recentMessages, statedSalesFor, listFollowups,
-  negotiationOutcomes, updateCustomer,
+  negotiationOutcomes, updateCustomer, allCustomers,
 } from './customers.js';
 import { isSuppressed } from '../sentinel/conversations.js';
 import { findProduct, catalog } from './catalog.js';
@@ -69,6 +69,34 @@ export function nextActionFor(q) {
     case 'post_purchase_support': return 'Handle care issue; do not concede or re-sell';
     default: return 'Offer menu; do not concede';
   }
+}
+
+/** Stages staff must see even without a CAP-008 conversation. */
+export const QUEUE_STAGES = Object.freeze(['high_intent', 'negotiation', 'purchase_ready']);
+
+/**
+ * Read-only staff queue. Does not persist, escalate, send, or mark paid.
+ * next_action is always the live nextActionFor() result.
+ */
+export function listQueuedLeads() {
+  const rank = { purchase_ready: 0, negotiation: 1, high_intent: 2 };
+  const out = [];
+  for (const c of allCustomers()) {
+    const phone = c && c.phone;
+    if (!phone) continue;
+    const q = qualificationOf(phone);
+    if (!QUEUE_STAGES.includes(q.stage)) continue;
+    out.push({
+      phone,
+      stage: q.stage,
+      lead_score: q.lead_score,
+      next_action: nextActionFor(q),
+    });
+  }
+  out.sort((a, b) => (rank[a.stage] - rank[b.stage])
+    || (b.lead_score - a.lead_score)
+    || String(a.phone).localeCompare(String(b.phone)));
+  return out;
 }
 
 function pack(stage, { paid, human_owned, signals, confidence }) {

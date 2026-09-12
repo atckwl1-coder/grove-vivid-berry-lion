@@ -44,7 +44,7 @@ export const loginPage = (err = '') => `<!doctype html><meta charset=utf-8><titl
 <button style="width:100%">Login</button></form>
 <p class=tag>Internal staff tool. All actions are audited.</p></div>`;
 
-export function listPage(actor, convs, killState = { state: 'AUTOMATION_ACTIVE' }, csrf = '', err = '', info = '', unpaid = []) {
+export function listPage(actor, convs, killState = { state: 'AUTOMATION_ACTIVE' }, csrf = '', err = '', info = '', unpaid = [], leads = []) {
   const rows = convs.map((c) => `<tr>
     <td>${c.unread ? '⚑ ' : ''}<a href="/inbox/c/${encodeURIComponent(c.phone)}">${esc(c.phone)}</a></td>
     <td>${esc((c.lastMessage || c.reason || '').slice(0, 60))}</td>
@@ -84,9 +84,21 @@ export function listPage(actor, convs, killState = { state: 'AUTOMATION_ACTIVE' 
     <p class=tag>Does not require a CAP-008 conversation. Not a payment gateway. Does not send WhatsApp.</p>
     <table><tr><th>Customer</th><th>Product</th><th>Verification</th><th>At</th><th>Action</th></tr>
     ${unpaidRows || '<tr><td colspan=5>No unpaid stated purchases.</td></tr>'}</table>`;
+  const leadRows = (leads || []).map((l) => `<tr>
+    <td>${esc(l.phone || '')}</td>
+    <td>${esc(l.stage || '')}</td>
+    <td>${esc(l.lead_score ?? '')}</td>
+    <td>${esc(l.next_action || '')}</td>
+  </tr>`).join('');
+  const leadPanel = `
+    <h3>Active sales leads (${(leads || []).length})</h3>
+    <p class=tag>high_intent / negotiation / purchase_ready. Does not require a CAP-008 conversation. Does not send WhatsApp. next_action is deterministic.</p>
+    <table><tr><th>Customer</th><th>Stage</th><th>Score</th><th>Next action</th></tr>
+    ${leadRows || '<tr><td colspan=4>No queued sales leads.</td></tr>'}</table>`;
   return page('Inbox', actor, `${banner}${err ? `<div class=err>${esc(err)}</div>` : ''}${info ? `<div class=inf>${esc(info)}</div>` : ''}
 <h3>Conversations (${convs.length})</h3>
 <table><tr><th>Customer</th><th>Last</th><th>State</th><th>Assigned</th><th>Reason</th><th>SLA</th></tr>${rows || '<tr><td colspan=6>No escalations yet.</td></tr>'}</table>
+${leadPanel}
 ${unpaidPanel}
 ${actor.role === 'OWNER' ? '<p><a href="/inbox/ops">Owner ops</a> · <a href="/inbox/b2">B-2 preflight</a></p>' : ''}<p class=tag>Auto-sort: QUEUED first, then unread count, then SLA pressure.</p>`);
 }
