@@ -1,8 +1,17 @@
 # SENTINEL CURRENT STATE RECONCILIATION
 
-Permanent copy of the 2026-09-12 inspection. **Not a VR. Not production certification.**
-Does not rewrite git history. Does not fabricate live WhatsApp evidence.
+**HISTORICAL.** Permanent copy of the 2026-09-12 freeze-time inspection. **Not a VR. Not production certification. Not current HEAD.**
 
+Current product state is `STATE.md` on `main` `6b507e9159f9e95e6be994242373899782904cbc` (suite **332/332**). Historical freeze tag `sentinel-v1.6-pilot-freeze` → `f92a3f8d…`.
+
+Superseded claims in this file (do not treat as current):
+- suite 292/292 (was true at freeze; now 332/332)
+- “confirm-paid still needs an existing CAP-008 conversation” (removed 2026-09-13, `286d390`)
+- inspection HEAD `0f887ec` (freeze later pinned V1-6 at `f92a3f8d`; current main is ahead)
+
+Does not rewrite git history. Does not fabricate live WhatsApp evidence. B-2 remains **BLOCKED / NOT RUN**. Typing is code-verified, not live-proven. `SENT`/`SUBMITTED` ≠ `DELIVERED`. Catalog remains **STALE** until owner re-verify. Nothing is `VERIFIED_PRODUCTION`.
+
+---
 Inspection baseline HEAD: `0f887ec54e38245adc1f4001a3e03a15ee434ac6`
 (branch `main`; subject: typing-presence records — VR-2026-09-11-02).
 V1-5′ through V1-6 existed only in the working tree at inspection time; this freeze commit is the first git preservation of that tree.
@@ -179,7 +188,7 @@ None of these reopen P2, kill, CAP-008 FSM, floors, or QR.
 ## K. ITEMS THAT ACTUALLY NEED ATTENTION (after freeze)
 
 1. `VERIFICATION_LOG.md` still lacks VR entries for V1-5′ / DEBT-07 / V1-5.1 / V1-6.
-2. `confirm-paid` still needs an existing CAP-008 conversation.
+2. ~~`confirm-paid` still needs an existing CAP-008 conversation.~~ **SUPERSEDED 2026-09-13** (`286d390` on current `main`).
 3. B-2 is still OPEN. Preflight must not close it.
 4. B-7 Reno 16F floor still owner-blocked.
 5. Flat allow-list collisions (A3x / trade-in next to “Reno 16”) remain.
@@ -200,7 +209,7 @@ After freeze, do not start another milestone from this document.
 
 | Item | Label |
 |---|---|
-| Sandbox suite last recorded | **VERIFIED** 292/292 ×2 (pre-freeze) |
+| Sandbox suite last recorded | **VERIFIED** 292/292 ×2 (**pre-freeze historical**; current `main` is 332/332) |
 | Owner floors / hashes | **VERIFIED** |
 | Meta Cloud API send path | **IMPLEMENTED BUT UNPROVEN** |
 | B-2 live WABA | **OPEN** |

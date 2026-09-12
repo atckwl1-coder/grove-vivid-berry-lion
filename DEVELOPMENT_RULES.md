@@ -32,6 +32,8 @@ The current permanent baseline is:
 
 This tag must remain recoverable. Do not delete it casually.
 
+It is a **historical** V1-6 pilot freeze, not automatically current `main`. Approved product commits may land on `main` after this SHA. Current HEAD and suite: `STATE.md`.
+
 ---
 
 ## 3. FEATURE BRANCHES

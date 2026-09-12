@@ -3,7 +3,7 @@
 | # | Blocker | Blocks | Since | Exact unblock criteria |
 |---|---|---|---|---|
 | B-1 | **External audit infrastructure absent**: `.claude/ai-bridge/AUDIT_PROTOCOL.md` + a fresh-context auditor dispatch mechanism do not exist in this workspace (proven 2026-09-08, see GPT_AUDIT.md §A) | Audit-gate acceptance for EVERY shipped capability (CAP-001/011, 2A.1, CAP-008, CAP-055, P2). Implementations still pass their own suites; the external-review gate stays open | 2026-09-08 | Place the real protocol + dispatch mechanism in the workspace; dispatch ONE fresh-context read-mostly auditor per capability; verify its diff; append findings to GPT_AUDIT.md |
-| B-2 | Real WhatsApp pilot (Phase 5) not run | Any VERIFIED_PRODUCTION status | always | Real Meta creds + pilot window + observed deliveries |
+| B-2 | Real WhatsApp pilot (Phase 5) **BLOCKED / NOT RUN** — no WABA token, `PHONE_NUMBER_ID`, `META_APP_SECRET`, or authorized test handset in this environment. Preflight/checklist are not live evidence. | Any `VERIFIED_PRODUCTION` status; any claim of customer `DELIVERED` | always | Real Meta creds + authorized handset/WABA + recorded B-2 checklist. Provider accept = `SUBMITTED`/`SENT` only. |
 | B-3 | DEBT-17 audit rotation/segmentation | long-run audit durability | 2026-09-07 | Rotate + segment headers + verifier tool |
 | B-4 | DEBT-18 customers-DB sensitive-zone controls | PII posture hardening | 2026-09-07 | Access controls + retention on message store |
 | B-5 | DEBT-19 Secure-cookie + login rate-limit | any internet exposure of inbox | 2026-09-08 | TLS + Secure flag + throttling before public deploy |

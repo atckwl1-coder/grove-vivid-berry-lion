@@ -62,4 +62,4 @@ Owner catalog ritual: `node scripts/verify-catalog.mjs --verify` (24h TTL; stale
 
 ## Status
 
-See `STATE.md`, `PROGRESS.md`, and `HANDOFF.md`. V1-6 feature integration is in DEMO on a frozen V1-5.1 safety gate. It is **not** a live Meta smoke test and **not** a QR transport. D-010 (`D010_TRANSPORT_PREFLIGHT.md`) is a decision record; `B2_LIVE_SMOKE_CHECKLIST.md` is operator prep. B-2 remains OPEN.
+See `STATE.md`, `PROGRESS.md`, and `HANDOFF.md`. Current `main` is `6b507e9` (332/332 DEMO). V1-6 plus post-freeze staff product (confirm-paid without conversation, lead queue, staff-recorded stated sale, unpaid uniqueness) sit on the frozen V1-5.1 safety gate. Historical tag `sentinel-v1.6-pilot-freeze` is **not** current HEAD. This is **not** a live Meta smoke test and **not** a QR transport. Catalog prices are **STALE** until the owner re-verifies. D-010 (`D010_TRANSPORT_PREFLIGHT.md`) is a decision record; `B2_LIVE_SMOKE_CHECKLIST.md` is operator prep. **B-2 is BLOCKED / NOT RUN.** Nothing is `VERIFIED_PRODUCTION`. `SENT`/`SUBMITTED` ≠ `DELIVERED`.

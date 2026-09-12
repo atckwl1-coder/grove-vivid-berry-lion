@@ -5,7 +5,7 @@
 **CURRENT TRANSPORT = Meta Cloud API**  
 **QR / SESSION / Baileys = NOT IMPLEMENTED** (do not start a QR adapter during this run).  
 **Live delivery = IMPLEMENTED BUT UNPROVEN.**  
-**B-2 remains OPEN until a real WABA run is recorded.**
+**B-2 remains OPEN.** It is **BLOCKED / NOT RUN** until a real WABA run is recorded. No Meta credentials or authorized handset in this environment.
 
 A completed paper copy of this list, a DEMO suite pass, or a `b2Preflight()` dump is **not** a live-success claim. Do not mark B-2 closed. Do not write VERIFIED_PRODUCTION. Do not report customer DELIVERED.
 
@@ -139,7 +139,7 @@ Evidence pointer: ________________________________
 
 **Purpose:** paid is a staff (or future POS) confirmation of an **existing** stated sale. Not a payment gateway. Not an outbound send.
 
-1. The test conversation must already have an engine-recorded `outcome=sale` **and** an inbox row (`requireConversation`). A stated sale that never escalated has no confirm-paid target — escalate first (`menu_staff` / `*staff*`).
+1. An **existing unpaid stated sale** is required (`outcome=sale`, `verification≠paid`). A CAP-008 conversation row is **not** required. Staff may also `POST /inbox/stated-sale` for a catalog SKU, then confirm-paid.
 2. `POST /inbox/c/:phone/confirm-paid` (auth + CSRF + tenant + actionId).
 3. Confirm `verification=paid`, audit `SALE_PAID_CONFIRMED` (repeat → `SALE_PAID_ALREADY_CONFIRMED`, no duplicate follow-up).
 4. Confirm LLM/router/negotiation cannot call `confirmPaidSale`.
@@ -205,4 +205,4 @@ Evidence pointer: ________________________________
 3. Outbox `SENT` ≠ customer receipt. Follow-up `SUBMITTED` ≠ `DELIVERED`. **DELIVERED is never claimed.**
 4. HTTP 200 on `/webhook` is not HMAC proof. Graph 200 is not DELIVERED.
 5. `b2Preflight()` READY in DEMO (`is_live=false`) is config/code readiness, not live delivery.
-6. **B-2 remains OPEN** until that real WABA run is recorded. Nothing in this file closes it.
+6. **B-2 remains OPEN.** It is **BLOCKED / NOT RUN** until that real WABA run is recorded. Nothing in this file closes it.

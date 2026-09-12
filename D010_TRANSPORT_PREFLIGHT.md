@@ -17,7 +17,7 @@ Inspected 2026-09-12 against this tree:
 - Dependencies: `axios`, `dotenv`, `express`, `node-cron`. **No** Baileys, whatsapp-web.js, WPPConnect, QR library, or WhatsApp WebSocket client.
 - `src/services/whatsapp.js` talks to `https://graph.facebook.com/{version}/{phoneNumberId}/messages`.
 - `isLive()` = `WHATSAPP_TOKEN && PHONE_NUMBER_ID`. Otherwise DEMO (no Meta network).
-- Live Cloud API delivery: **IMPLEMENTED BUT UNPROVEN** (B-2 still open).
+- Live Cloud API delivery: **IMPLEMENTED BUT UNPROVEN** (**B-2 BLOCKED / NOT RUN** — no live credentials).
 
 ---
 
@@ -43,7 +43,7 @@ Inspected 2026-09-12 against this tree:
 
 **Day-10 implications.** Utility/care templates would be needed for out-of-window care. **Not implemented.** Inside window, free-form is allowed by the API (and billed under the 2026 utility change — UNKNOWN rate).
 
-**Typing / read.** Official typing indicator on the same messages endpoint (wired 2026-09-11). Read receipts exist; not used as delivery proof.
+**Typing / read.** Official typing indicator on the same messages endpoint (wired 2026-09-11). **Code-verified in DEMO; not live-proven.** Read receipts exist; not used as delivery proof.
 
 **Interactive menus.** Official buttons + lists (already used).
 

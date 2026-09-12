@@ -1,17 +1,20 @@
-# STATE — truthful snapshot (2026-09-12, post V1-6 Rapid Feature Integration)
+# STATE — truthful snapshot (2026-09-13, post-freeze product cycle)
 
-- **HEAD:** working tree on top of `0f887ec` (typing-presence records). V1-5.1 remains **FROZEN**. This cycle added product features on top of that safety gate; it did not reopen firewall/kill/outbox/FSM/floors.
-- **Suite:** `npm test` sequential per-file runner. **VERIFIED 2026-09-12:** 19 files, **292/292 pass × 2 consecutive clean processes** (was 241/241; +51 V1-6 focused tests: qualify 15, profile 9, compare 7, ops 5, b2 6, crm 9). Owner-file sha256 unchanged (`products.json` `2f10d77e…`, `negotiation-rules.json` `c4414e14…`, `sales-skills.json` `18841306…`). Do not cite this number after the next code change without re-running.
-- **Live server:** DEMO unless Cloud API tokens are set. Real WhatsApp is **IMPLEMENTED BUT UNPROVEN**. B-2 remains **OPEN**. `b2Preflight()` and `B2_LIVE_SMOKE_CHECKLIST.md` are operator prep, not live evidence.
-- **Kill switch / firewall / CAP-008 / outbox / numberFirewall:** unchanged architecture. Kill still dominates autonomous execution. Human takeover still suppresses AI. P2 and outbox.enqueue still do not inspect amounts. Staff `confirm-paid` is **not** an outbound send. LLM/router/qualification/profile/compare/care/ops **cannot** call `confirmPaidSale`.
+- **HEAD:** `main` `6b507e9159f9e95e6be994242373899782904cbc` (`fix: prevent duplicate unpaid sales per phone and SKU`). Tracks origin. Working tree clean at last docs pass.
+- **Historical freeze:** tag `sentinel-v1.6-pilot-freeze` → `f92a3f8d6838384f5ab6feb67598c35d8075a8a1`. Historical V1-6 safety-gate pin only. Current `main` is **ahead** of that tag. Do not treat the freeze as current HEAD.
+- **Suite:** `npm test` sequential per-file runner. **VERIFIED 2026-09-13 after merge of unpaid uniqueness:** 23 files, **332/332 pass** (fail=0). Do not cite this number after the next code change without re-running.
+- **Live server:** DEMO unless Cloud API tokens are set. Real WhatsApp is **IMPLEMENTED BUT UNPROVEN**. **B-2 is BLOCKED / NOT RUN** — no live Meta credentials or authorized test handset/WABA in this environment. `b2Preflight()` and `B2_LIVE_SMOKE_CHECKLIST.md` are operator prep, **not** live evidence. Provider `SENT`/`SUBMITTED` ≠ customer `DELIVERED`. Sentinel never claims `DELIVERED`.
+- **Catalog:** shipped `products.json` `observed_at` is 2026-09-05 / 2026-09-10. Versus wall clock **STALE** until the owner re-runs `node scripts/verify-catalog.mjs --verify`. STALE quotes are dated “aakhri verified price”, never “aaj ki price”.
+- **Kill switch / firewall / CAP-008 FSM / outbox / numberFirewall:** unchanged architecture since the freeze. Kill still dominates autonomous execution. Human takeover still suppresses AI. P2 and `outbox.enqueue` still do not inspect amounts. Staff `confirm-paid` is **not** an outbound send. LLM/router/qualification/profile/compare/care/ops **cannot** call `confirmPaidSale` or `recordStaffStatedSale`.
 - **Negotiation:** Reno 16 floor **Rs. 186,800 RESOLVED**. Reno 16F **UNRESOLVED** (do not guess; compare path states that explicitly and does not leak 186800 onto 16F). Engine owns numbers on its path. LLM replies are untrusted until DEBT-07 number firewall allows them.
-- **V1-6 product layer (DEMO/PILOT):**
-  - Deterministic lead qualification (`stateData.qualification`) — evidence stages, not message-count. `human_owned` is a flag, not a stage.
-  - Bounded CRM profile (`stateData.profile`) — CUSTOMER_STATED facts only. Budget is untrusted and is **not** an allow-listed price.
-  - Catalog compare + recommend — catalog/`priceCardLine` only. Recommend trigger is explicit (`recommend` / `suggest` / `konsa … phone`); a bare “mera budget …” stays on the LLM/memory path.
-  - Setup-help copy (not a scheduled chase). Paid-customer issue copy + existing CAP-008 escalate. No extra Day-0/3 scheduler.
-  - Staff CRM brief on the existing inbox (stage, score, objections, next action, paid/follow-up). Owner ops snapshot + B-2 preflight page (OWNER, auth). Incomplete KPIs render **UNKNOWN/PARTIAL**, never a fake 0.
-- **Transport (D-010):** **CURRENT TRANSPORT = Meta Cloud API. QR / SESSION = NOT IMPLEMENTED.** No adapter was written this cycle. `src/` contains none of the banned client tokens.
+- **Post-freeze staff product (DEMO/PILOT, on this `main`):**
+  - Staff **confirm-paid without a prior CAP-008 conversation row** (`POST /inbox/c/:phone/confirm-paid`) — still requires an existing unpaid stated sale; still auth+CSRF+tenant; still not a PSP; still no WhatsApp send.
+  - Staff **lead queue** on `/inbox` for `high_intent` / `negotiation` / `purchase_ready` even with no conversation row. Read-only. Reuses `nextActionFor()`. Does not create CAP-008 rows or enqueue WhatsApp.
+  - Staff **recorded unpaid catalog sale** (`POST /inbox/stated-sale`) — `outcome=sale`, `verification=customer_statement`. Duplicate unpaid same phone+SKU is idempotent.
+  - **One unpaid stated sale per phone + exact catalog SKU** — staff and engine `closeAt` share `recordUnpaidStatedSale()`. A prior **paid** sale of the same SKU still allows a new unpaid sale. Different SKU allowed. Raw `recordNegotiation()` (test/seed append) is unchanged.
+- **V1-6 product layer (still present):** deterministic qualification; CUSTOMER_STATED profile (budget UNTRUSTED); catalog compare/recommend; setup-help copy (not a scheduled chase); staff CRM brief; OWNER ops snapshot + B-2 preflight page. Incomplete KPIs render **UNKNOWN/PARTIAL**, never a fake 0.
+- **Typing indicator:** code-verified on the Meta Cloud API path in DEMO. **Not live-proven.**
+- **Transport (D-010):** **CURRENT TRANSPORT = Meta Cloud API. QR / SESSION = NOT IMPLEMENTED.**
 - **Do-not-touch without authorization:** CAP-008/055/P2 foundations, CAP-007 marketing, floors, QR/session transport, SQLite, STT/vision, payments, PTA/warranty APIs.
-- **Open debts (still):** DEBT-09 governor unwired, DEBT-17/18/19/20, **B-2 live Meta**, B-7 Reno 16F floor, remaining cross-SKU collisions, no POS, confirm-paid still needs an existing CAP-008 conversation row.
+- **Open debts (still):** DEBT-09 governor unwired, DEBT-17/18/19/20, **B-2 live Meta (BLOCKED)**, B-7 Reno 16F floor, remaining cross-SKU collisions, no POS, catalog owner re-verify, inbox must not be internet-exposed until DEBT-19.
 - **Production status:** DEMO/PILOT. Safer for a **small staffed sample in DEMO**. Nothing here is `VERIFIED_PRODUCTION`.
