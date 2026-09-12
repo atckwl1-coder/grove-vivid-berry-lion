@@ -42,7 +42,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { catalog, findProduct, productStatus, formatPrice, observedAtIso, catalogEvidence, approvedBenefitsLine, priceCardLine, stockLine } from './catalog.js';
-import { getCustomer, updateCustomer, recordNegotiation, negotiationOutcomes } from './customers.js';
+import { getCustomer, updateCustomer, recordNegotiation, recordUnpaidStatedSale, negotiationOutcomes } from './customers.js';
 import * as wa from './whatsapp.js';
 import { escalate } from '../sentinel/conversations.js';
 
@@ -315,11 +315,12 @@ export async function handleNegotiation(from, rawText, msg, customer) {
   const closeAt = async (price) => {
     n.skills_used.push('SK-10'); // closing is part of the sequence — record it
     if (!n.outcome_recorded) {
-      recordNegotiation({
+      recordUnpaidStatedSale({
         phone: from, product: p.id, outcome: 'sale',
         start: n.start, final_offer: price, discount_amount: n.start - price,
         concessions: n.concessions, skills: [...n.skills_used], objections: [...n.objections],
         verification: 'customer_statement',
+        source: 'engine',
         note: 'customer-stated acceptance at an approved price; no payment system in this deployment — not a verified payment',
       });
       n.outcome_recorded = true;

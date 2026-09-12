@@ -169,6 +169,41 @@ export function unpaidStatedSales() {
   return negotiationOutcomes().filter((r) => r.outcome === 'sale' && r.verification !== 'paid');
 }
 
+/** At most one unpaid sale per phone + exact catalog SKU. */
+export function unpaidStatedSaleFor(phone, product) {
+  const p = String(phone || '').trim();
+  const sku = String(product || '').trim();
+  if (!p || !sku) return null;
+  return negotiationOutcomes().find((r) =>
+    r && r.phone === p && r.product === sku && r.outcome === 'sale' && r.verification !== 'paid') || null;
+}
+
+/**
+ * Shared unpaid-sale writer for staff and engine.
+ * Does not mark paid. Duplicate unpaid phone+SKU is idempotent.
+ * A prior paid sale of the same SKU does not block a new unpaid sale.
+ */
+export function recordUnpaidStatedSale(rec) {
+  const phone = String(rec?.phone || '').trim();
+  const product = String(rec?.product || '').trim();
+  const existing = unpaidStatedSaleFor(phone, product);
+  if (existing) {
+    audit('SALE_STATED_ALREADY', {
+      phone, product, source: rec?.source || 'engine',
+      staffId: rec?.staffId || null, actionId: rec?.actionId || null,
+    });
+    return { rec: existing, status: 'ALREADY_RECORDED' };
+  }
+  recordNegotiation({
+    ...rec,
+    phone,
+    product,
+    outcome: 'sale',
+    verification: rec?.verification || 'customer_statement',
+  });
+  return { rec: unpaidStatedSaleFor(phone, product), status: 'STATED_RECORDED' };
+}
+
 function catalogSku(product) {
   const sku = String(product || '').trim().toLowerCase().replace(/[\s-]/g, '');
   if (!sku) return null;
@@ -196,8 +231,7 @@ export function recordStaffStatedSale({ phone, product, staffId = 'staff', actio
     e.code = 'UNKNOWN_SKU';
     throw e;
   }
-  const unpaid = negotiationOutcomes().find((r) =>
-    r && r.phone === p && r.product === hit.id && r.outcome === 'sale' && r.verification !== 'paid');
+  const unpaid = unpaidStatedSaleFor(p, hit.id);
   if (unpaid) {
     audit('SALE_STATED_ALREADY', {
       phone: p, product: hit.id, staffId: String(staffId || 'staff'), actionId: actionId || null,
@@ -205,7 +239,7 @@ export function recordStaffStatedSale({ phone, product, staffId = 'staff', actio
     return { rec: unpaid, status: 'ALREADY_RECORDED' };
   }
   touchCustomer(p);
-  recordNegotiation({
+  return recordUnpaidStatedSale({
     phone: p,
     product: hit.id,
     outcome: 'sale',
@@ -215,11 +249,6 @@ export function recordStaffStatedSale({ phone, product, staffId = 'staff', actio
     actionId: actionId || null,
     note: 'staff-recorded stated purchase of a catalog SKU; not a verified payment',
   });
-  const rec = statedSalesFor(p).filter((r) => r.product === hit.id).at(-1);
-  audit('SALE_STATED_RECORDED', {
-    phone: p, product: hit.id, staffId: String(staffId || 'staff'), actionId: actionId || null,
-  });
-  return { rec, status: 'STATED_RECORDED' };
 }
 
 /**
