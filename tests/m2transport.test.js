@@ -41,7 +41,7 @@ const {
   sessionNotActivatedSend,
   metaSideEffectsAllowed,
 } = await import('../src/sentinel/transport.js');
-const { createSessionAdapter } = await import('../src/sentinel/session/adapter.js');
+const { createSessionAdapter, MAX_RECONNECT_ATTEMPTS, RECONNECT_MS } = await import('../src/sentinel/session/adapter.js');
 const { digitsFromJid, digitsToJid } = await import('../src/sentinel/session/jid.js');
 const { interactiveToText, mapCloudPayload } = await import('../src/sentinel/session/payload.js');
 const { ensureWaSessionDir, waSessionDir, markCorrupted } = await import('../src/sentinel/session/store.js');
@@ -345,6 +345,111 @@ test('M2A.18 no session library outside librarySocket.js; pin 6.7.24', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8'));
   assert.equal(pkg.dependencies['@whiskeysockets/baileys'], '6.7.24');
   assert.match(fs.readFileSync(LIB_FILE, 'utf8'), /6\.7\.24/);
+});
+
+test('M2A.19 AUTH_REQUIRED + late socket open stays AUTH_REQUIRED; send blocked', async () => {
+  const sock = mockSocket();
+  const adapter = createSessionAdapter({
+    authDir: process.env.WA_SESSION_DIR,
+    openSocket: async () => sock,
+    reconnectMs: 10,
+  });
+  await adapter.start();
+  sock.ev.emit('connection.update', { connection: 'open' });
+  assert.equal(adapter.getState().state, 'CONNECTED');
+  sock.ev.emit('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 401 } } } });
+  assert.equal(adapter.getState().state, 'AUTH_REQUIRED');
+
+  sock.ev.emit('connection.update', { connection: 'open' });
+  assert.equal(adapter.getState().state, 'AUTH_REQUIRED');
+  await assert.rejects(
+    () => adapter.sendFn({ to: '923001119999', type: 'text', text: { body: 'x' } }),
+    (e) => e.code === 'SESSION_NOT_CONNECTED',
+  );
+  sock.ev.emit('connection.update', { qr: 'SHOULD-NOT-PAIR' });
+  assert.equal(adapter.getState().state, 'AUTH_REQUIRED');
+  assert.equal(adapter.getState().qrAvailable, false);
+  await adapter.start();
+  assert.equal(adapter.getState().state, 'AUTH_REQUIRED');
+  await adapter.stop();
+  assert.equal(adapter.getState().state, 'AUTH_REQUIRED');
+});
+
+test('M2A.20 owner resetAuth is the only in-process way out of AUTH_REQUIRED; no QR loop', async () => {
+  let opens = 0;
+  let current;
+  const adapter = createSessionAdapter({
+    authDir: process.env.WA_SESSION_DIR,
+    reconnectMs: 10,
+    openSocket: async () => {
+      opens += 1;
+      current = mockSocket();
+      return current;
+    },
+  });
+  await adapter.start();
+  current.ev.emit('connection.update', { connection: 'open' });
+  const opensAfterConnect = opens;
+  current.ev.emit('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 401 } } } });
+  await new Promise((r) => setTimeout(r, 40));
+  assert.equal(opens, opensAfterConnect, '401 must not reconnect');
+  assert.throws(() => adapter.resetAuth({ role: 'STAFF' }), (e) => e.code === 'OWNER_ONLY');
+  const snap = adapter.resetAuth({ role: 'OWNER' });
+  assert.equal(snap.state, 'STOPPED');
+  await adapter.start();
+  current.ev.emit('connection.update', { connection: 'open' });
+  assert.equal(adapter.getState().state, 'CONNECTED');
+});
+
+test('M2A.21 reconnect budget exhaustion → DEGRADED; creds intact; owner start retries', async () => {
+  assert.equal(MAX_RECONNECT_ATTEMPTS, 5);
+  assert.equal(RECONNECT_MS, 1500);
+  const dir = process.env.WA_SESSION_DIR;
+  fs.mkdirSync(dir, { recursive: true });
+  const credsPath = path.join(dir, 'creds.json');
+  fs.writeFileSync(credsPath, JSON.stringify({ registered: true, dummy: 'x'.repeat(40) }));
+
+  let opens = 0;
+  let current;
+  const adapter = createSessionAdapter({
+    authDir: dir,
+    reconnectMs: 10,
+    maxReconnectAttempts: 3,
+    openSocket: async () => {
+      opens += 1;
+      current = mockSocket();
+      return current;
+    },
+  });
+  await adapter.start();
+  current.ev.emit('connection.update', { connection: 'open' });
+  for (let i = 0; i < 3; i++) {
+    current.ev.emit('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 408 } } } });
+    assert.equal(adapter.getState().state, 'RECONNECTING');
+    await new Promise((r) => setTimeout(r, 10 * (i + 1) + 25));
+  }
+  current.ev.emit('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 408 } } } });
+  assert.equal(adapter.getState().state, 'DEGRADED');
+  const afterBudget = opens;
+  await new Promise((r) => setTimeout(r, 80));
+  assert.equal(opens, afterBudget, 'exhausted budget must not keep reconnecting');
+  assert.equal(adapter.getState().state, 'DEGRADED');
+  current.ev.emit('connection.update', { qr: 'NO-AUTO-QR' });
+  assert.equal(adapter.getState().state, 'DEGRADED');
+  assert.equal(adapter.getState().qrAvailable, false);
+  assert.equal(fs.existsSync(credsPath), true);
+  assert.ok(fs.statSync(credsPath).size > 32);
+  await assert.rejects(
+    () => adapter.sendFn({ to: '923001119999', type: 'text', text: { body: 'x' } }),
+    (e) => e.code === 'SESSION_NOT_CONNECTED',
+  );
+
+  await adapter.start();
+  current.ev.emit('connection.update', { connection: 'open' });
+  assert.equal(adapter.getState().state, 'CONNECTED');
+  const sent = await adapter.sendFn({ to: '923001119999', type: 'text', text: { body: 'retry' } });
+  assert.equal(sent.submitted, true);
+  assert.equal(sent.delivered, false);
 });
 
 test('ISO. shipped owner files were not mutated', () => {

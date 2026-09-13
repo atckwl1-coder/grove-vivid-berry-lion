@@ -4,6 +4,10 @@
  * ONLY a transport. No brain / CRM / negotiation / firewall / outbox import.
  * Reconnect lives here — not in humanPaced/sessionHealth.js.
  * Default factory is injected; live library is loaded only by librarySocket.js.
+ *
+ * AUTH_REQUIRED is a hard in-process lock until explicit owner resetAuth()
+ * or a new adapter instance (process restart). Late socket-open cannot
+ * become CONNECTED. Reconnect is bounded (same defaults as outbox retry).
  */
 import { audit } from '../audit.js';
 import { createMachine } from './states.js';
@@ -12,7 +16,10 @@ import { credsPresent, ensureWaSessionDir, isCorrupted } from './store.js';
 
 const SEND_TIMEOUT_MS = 15000;
 const MAX_QR = 24;
-const RECONNECT_MS = 1500;
+/** Matches config.retry.baseMs default — no extra retry framework. */
+export const RECONNECT_MS = 1500;
+/** Matches config.retry.maxAttempts default. */
+export const MAX_RECONNECT_ATTEMPTS = 5;
 
 function withTimeout(promise, ms, code = 'SESSION_SEND_TIMEOUT') {
   return new Promise((resolve, reject) => {
@@ -28,6 +35,10 @@ function withTimeout(promise, ms, code = 'SESSION_SEND_TIMEOUT') {
   });
 }
 
+function terminalAuth(state) {
+  return state === 'AUTH_REQUIRED' || state === 'CORRUPTED' || state === 'DISABLED';
+}
+
 export function createSessionAdapter(opts = {}) {
   const authDir = opts.authDir;
   const openSocket = opts.openSocket;
@@ -35,6 +46,9 @@ export function createSessionAdapter(opts = {}) {
   const onConnection = opts.onConnection;
   const auditFn = opts.auditFn || audit;
   const reconnectMs = Number.isFinite(opts.reconnectMs) ? opts.reconnectMs : RECONNECT_MS;
+  const maxReconnectAttempts = Number.isFinite(opts.maxReconnectAttempts)
+    ? opts.maxReconnectAttempts
+    : MAX_RECONNECT_ATTEMPTS;
 
   const machine = createMachine((rec) => {
     auditFn('SESSION_TRANSPORT', { state: rec.next, prev: rec.prev, reason: rec.reason });
@@ -46,6 +60,8 @@ export function createSessionAdapter(opts = {}) {
   let starting = false;
   let reconnectTimer = null;
   let stopped = true;
+  let authLocked = false;
+  let reconnectAttempts = 0;
 
   function clearReconnect() {
     if (reconnectTimer) {
@@ -56,6 +72,14 @@ export function createSessionAdapter(opts = {}) {
 
   function forgetQr() {
     qrPayload = null;
+  }
+
+  function lockAuth(reason) {
+    authLocked = true;
+    clearReconnect();
+    forgetQr();
+    sock = null;
+    machine.set('AUTH_REQUIRED', reason);
   }
 
   function publicState() {
@@ -77,7 +101,7 @@ export function createSessionAdapter(opts = {}) {
     };
   }
 
-  /** Owner-only consumer. Returns QR string once; never logs it. */
+  /** Owner-only consumer. Returns QR string; never logs it. */
   function takeQr(actor) {
     if (!actor || actor.role !== 'OWNER') {
       const e = new Error('OWNER_ONLY');
@@ -88,6 +112,25 @@ export function createSessionAdapter(opts = {}) {
     return q;
   }
 
+  /**
+   * Owner-only: clear AUTH_REQUIRED lock so start() may re-pair.
+   * Does not delete persisted credentials.
+   */
+  function resetAuth(actor) {
+    if (!actor || actor.role !== 'OWNER') {
+      const e = new Error('OWNER_ONLY');
+      e.code = 'OWNER_ONLY';
+      throw e;
+    }
+    authLocked = false;
+    reconnectAttempts = 0;
+    qrSeq = 0;
+    forgetQr();
+    clearReconnect();
+    machine.set('STOPPED', 'owner reset auth lock');
+    return publicState();
+  }
+
   function attach(socket) {
     sock = socket;
     const ev = socket?.ev;
@@ -95,38 +138,60 @@ export function createSessionAdapter(opts = {}) {
 
     ev.on('connection.update', (update = {}) => {
       const { connection, qr, lastDisconnect } = update;
+
       if (qr) {
-        qrSeq += 1;
-        if (qrSeq > MAX_QR) {
+        if (authLocked || terminalAuth(machine.state) || machine.state === 'DEGRADED') {
           forgetQr();
-          machine.set('AUTH_REQUIRED', 'QR pairing window exhausted');
-          if (typeof onConnection === 'function') onConnection({ ...update, connection: 'close', statusCode: 401 });
-          return;
+        } else {
+          qrSeq += 1;
+          if (qrSeq > MAX_QR) {
+            lockAuth('QR pairing window exhausted');
+            if (typeof onConnection === 'function') {
+              onConnection({ ...update, connection: 'close', statusCode: 401 });
+            }
+            try { if (socket?.end) socket.end(); } catch { /* best-effort */ }
+            return;
+          }
+          qrPayload = String(qr);
+          machine.set('NEEDS_QR', 'library emitted qr');
+          auditFn('SESSION_QR', { seq: qrSeq, available: true });
         }
-        qrPayload = String(qr);
-        machine.set('NEEDS_QR', 'library emitted qr');
-        auditFn('SESSION_QR', { seq: qrSeq, available: true });
       }
+
       if (connection === 'open') {
-        forgetQr();
-        machine.set('CONNECTED', 'socket open');
+        if (authLocked || terminalAuth(machine.state)) {
+          forgetQr();
+          sock = null;
+          try { if (socket?.end) socket.end(); } catch { /* refuse live use */ }
+        } else {
+          forgetQr();
+          reconnectAttempts = 0;
+          sock = socket;
+          machine.set('CONNECTED', 'socket open');
+        }
       }
+
       if (connection === 'close') {
         const status = lastDisconnect?.error?.output?.statusCode
           ?? lastDisconnect?.statusCode
           ?? lastDisconnect
           ?? null;
         sock = null;
-        if (status === 401) {
+        if (authLocked || machine.state === 'AUTH_REQUIRED') {
           clearReconnect();
-          machine.set('AUTH_REQUIRED', 'loggedOut/401 — no auto QR loop');
+          forgetQr();
+        } else if (status === 401) {
+          lockAuth('loggedOut/401 — no auto QR loop');
         } else if (stopped) {
           machine.set('STOPPED', 'closed after stop');
+        } else if (machine.state === 'DEGRADED' || machine.state === 'DISABLED' || machine.state === 'CORRUPTED') {
+          /* stay — no reconnect */
         } else {
           machine.set('RECONNECTING', 'socket close status=' + String(status));
           scheduleReconnect();
         }
       }
+
       if (typeof onConnection === 'function') onConnection(update);
     });
 
@@ -141,29 +206,41 @@ export function createSessionAdapter(opts = {}) {
 
   function scheduleReconnect() {
     clearReconnect();
-    if (stopped) return;
-    if (machine.state === 'AUTH_REQUIRED' || machine.state === 'CORRUPTED' || machine.state === 'DISABLED') return;
+    if (stopped || authLocked || terminalAuth(machine.state) || machine.state === 'DEGRADED') return;
+    reconnectAttempts += 1;
+    if (reconnectAttempts > maxReconnectAttempts) {
+      machine.set('DEGRADED', 'reconnect budget exhausted');
+      return;
+    }
+    const delay = reconnectMs * reconnectAttempts;
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
-      if (stopped) return;
-      start().catch((err) => {
-        machine.set('DEGRADED', String(err?.message || err).slice(0, 80));
+      if (stopped || authLocked || terminalAuth(machine.state)) return;
+      start({ fromReconnect: true }).catch((err) => {
+        if (!authLocked && machine.state !== 'AUTH_REQUIRED') {
+          machine.set('DEGRADED', String(err?.message || err).slice(0, 80));
+        }
       });
-    }, reconnectMs);
+    }, delay);
     if (reconnectTimer.unref) reconnectTimer.unref();
   }
 
-  async function start() {
+  async function start(startOpts = {}) {
     if (machine.state === 'DISABLED') return publicState();
     if (isCorrupted(authDir)) {
       machine.set('CORRUPTED', 'CORRUPTED flag present');
-      machine.set('AUTH_REQUIRED', 'corrupted session — operator action required');
+      lockAuth('corrupted session — operator action required');
+      return publicState();
+    }
+    if (authLocked || machine.state === 'AUTH_REQUIRED') {
+      machine.set('AUTH_REQUIRED', 'auth locked until owner reset');
       return publicState();
     }
     stopped = false;
     if (starting) return publicState();
     starting = true;
     clearReconnect();
+    if (!startOpts.fromReconnect) reconnectAttempts = 0;
     machine.set('STARTING', 'adapter start');
     try {
       ensureWaSessionDir(authDir);
@@ -176,6 +253,11 @@ export function createSessionAdapter(opts = {}) {
       }
       machine.set('CONNECTING', credsPresent(authDir) ? 'restore existing creds' : 'fresh socket');
       const socket = await factory({ authDir: ensureWaSessionDir(authDir) });
+      if (authLocked || machine.state === 'AUTH_REQUIRED') {
+        try { if (socket?.end) socket.end(); } catch { /* */ }
+        sock = null;
+        return publicState();
+      }
       attach(socket);
       return publicState();
     } catch (err) {
@@ -197,12 +279,16 @@ export function createSessionAdapter(opts = {}) {
       else if (sock?.ws?.close) sock.ws.close();
     } catch { /* stop is best-effort */ }
     sock = null;
-    machine.set('STOPPED', 'adapter stop');
+    if (authLocked || machine.state === 'AUTH_REQUIRED') {
+      machine.set('AUTH_REQUIRED', 'stopped — auth still locked');
+    } else {
+      machine.set('STOPPED', 'adapter stop');
+    }
     return publicState();
   }
 
   async function sendFn(payload) {
-    if (machine.state !== 'CONNECTED' || !sock || typeof sock.sendMessage !== 'function') {
+    if (authLocked || machine.state !== 'CONNECTED' || !sock || typeof sock.sendMessage !== 'function') {
       const e = new Error('SESSION_NOT_CONNECTED');
       e.code = 'SESSION_NOT_CONNECTED';
       throw e;
@@ -221,7 +307,7 @@ export function createSessionAdapter(opts = {}) {
   }
 
   async function startTyping(_phone, jid) {
-    if (machine.state !== 'CONNECTED' || typeof sock?.sendPresenceUpdate !== 'function') return null;
+    if (authLocked || machine.state !== 'CONNECTED' || typeof sock?.sendPresenceUpdate !== 'function') return null;
     try {
       await sock.sendPresenceUpdate('composing', jid);
       return { ok: true, evidence: 'adapter_accepted' };
@@ -231,7 +317,7 @@ export function createSessionAdapter(opts = {}) {
   }
 
   async function markRead(keys) {
-    if (machine.state !== 'CONNECTED' || typeof sock?.readMessages !== 'function') return null;
+    if (authLocked || machine.state !== 'CONNECTED' || typeof sock?.readMessages !== 'function') return null;
     try {
       await sock.readMessages(keys);
       return { ok: true, evidence: 'adapter_accepted' };
@@ -247,6 +333,7 @@ export function createSessionAdapter(opts = {}) {
     startTyping,
     markRead,
     takeQr,
+    resetAuth,
     health,
     getState: publicState,
     get machineState() { return machine.state; },
