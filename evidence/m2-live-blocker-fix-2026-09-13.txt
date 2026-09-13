@@ -1,0 +1,85 @@
+M2 LIVE BLOCKER FIX — secret-free evidence
+Date: 2026-09-13
+Branch: feature/m2-live-blocker-fix
+Base main: 64fd32a2ba92c8156100267a94ba70fcbcecb6c2
+QR / creds / JIDs / cookies / Signal keys: omitted.
+
+THIS IS NOT VERIFIED_PRODUCTION. Not a pilot-readiness claim.
+SENT/SUBMITTED ≠ DELIVERED. CONNECTED ≠ CAUGHT_UP.
+
+===============================================================================
+BLOCKER 1 — Signal key material on stdout/stderr
+===============================================================================
+
+Cause (source, not Sentinel logger):
+  node_modules/libsignal/src/session_record.js closeSession():
+    console.info("Closing session:", session);
+  dumps the full SessionEntry (privKey, rootKey, currentRatchet, pendingPreKey).
+  Also session_builder.js: console.warn("Closing open session in favor of incoming prekey bundle").
+  Baileys silentLogger does not wrap libsignal's console.*.
+
+Fix:
+  src/sentinel/session/libraryConsoleGuard.js installed before the session
+  library runs (librarySocket.js). Drops those console methods at the call,
+  does not persist then redact.
+  audit() + logger refuse payloads matching key-material patterns.
+
+Live re-run (SENTINEL_TRANSPORT=session, dedicated test-number creds):
+  CONNECTED, qrSeq=0
+  stdout_privKey_buffer: false
+  stdout_rootKey_buffer: false
+  stdout_closing_session_obj: false
+  stderr empty
+  Verdict: LIVE-PROVEN for this process
+
+===============================================================================
+BLOCKER 2 — receivedPendingNotifications never true
+===============================================================================
+
+Library contract (baileys 6.7.24 lib/Socket/socket.js):
+  ev.buffer() on boot if creds.me.id
+  RPN is emitted ONLY on ws CB:ib,,offline
+  offline_batch is requested ONLY after CB:ib,,offline_preview
+
+Observed live (before and after nudge):
+  connection.update connecting (RPN false) then open
+  adapter onConnection received those events (SESSION_SOCKET in audit)
+  NO { receivedPendingNotifications: true } in the process lifetime (~30s+)
+  catchup stayed PENDING
+  No fake CAUGHT_UP on socket open (code + M2G.6)
+
+Fix attempted (not a fake CAUGHT_UP):
+  After connection open, if RPN not yet seen:
+    sock.ev.flush() (local event buffer only)
+    send the same ib/offline_batch node Baileys sends on preview
+  sessionInbound still waits for the real RPN event.
+
+Live after fix: RPN still false, catchup PENDING.
+  Blocker is library/WhatsApp stanza behavior, not a missing listener.
+  M0 harness also never recorded RPN (it ignored the field).
+
+===============================================================================
+LIVE CUSTOMER PATH
+===============================================================================
+
+Second WhatsApp send: NOT RUN — no second account in this environment.
+  Environment blocker, not a code bypass.
+
+Therefore:
+  live inbound, stable provider id, durable sess: claim, brain,
+  autonomous outbound, outage catch-up, duplicates, kill around a real
+  turn, HUMAN fallback: NOT-PROVEN / BLOCKED (environment)
+
+Session restore: LIVE-PROVEN
+Restart restore: LIVE-PROVEN (prior run)
+Cloud/session isolation this process: LIVE-PROVEN (no Meta tokens; transport=session)
+Key logging: LIVE-PROVEN suppressed
+CAUGHT_UP: NOT-PROVEN (RPN never emitted by library)
+
+Process SIGTERM at end. No logout. Store number not used. Defaults unchanged.
+
+===============================================================================
+SUITE
+===============================================================================
+
+419/419 ×2 after the fix (32 files).

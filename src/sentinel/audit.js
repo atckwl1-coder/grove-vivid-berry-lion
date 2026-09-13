@@ -25,11 +25,24 @@ export function redact(value) {
   return s.replace(/\b(\d{4})\d{4,5}(\d{3})\b/g, '$1****$2');
 }
 
+const KEY_MATERIAL_RE = /currentRatchet|"privKey"|privKey:\s*<Buffer|"rootKey"|rootKey:\s*<Buffer|pendingPreKey|signedIdentityKey/;
+
+export function payloadHasKeyMaterial(payload) {
+  try {
+    return KEY_MATERIAL_RE.test(JSON.stringify(payload));
+  } catch {
+    return false;
+  }
+}
+
 export function audit(type, payload = {}) {
+  const safePayload = payloadHasKeyMaterial(payload)
+    ? { blocked: 'KEY_MATERIAL' }
+    : payload;
   const entry = {
     ts: new Date().toISOString(),
     type,
-    payload: safeParse(redact(payload)),
+    payload: safeParse(redact(safePayload)),
     prev: lastHash,
   };
   entry.hash = crypto
