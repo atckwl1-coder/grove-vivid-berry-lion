@@ -87,6 +87,17 @@ test('M2F.1 OWNER can read session status JSON; QR payload is not in JSON', asyn
   assert.equal(JSON.stringify(body).includes('SECRET-M2-QR'), false);
 });
 
+test('M2F.1b session HTML shows catch-up and never embeds QR payload', async () => {
+  const cookie = await login('boss', 'boss-pass-007');
+  const r = await fetch(base + '/inbox/session', { headers: { cookie, accept: 'text/html' } });
+  const html = await r.text();
+  assert.equal(r.status, 200);
+  assert.match(html, /NEEDS_QR/);
+  assert.match(html, /Catch-up/);
+  assert.match(html, /Scan this QR|Send a test message/);
+  assert.equal(html.includes('SECRET-M2-QR'), false);
+});
+
 test('M2F.2 STAFF is denied session status', async () => {
   const cookie = await login('staffA', 'staffa-pass-1');
   const r = await fetch(base + '/inbox/session?json=1', { headers: { cookie } });
@@ -106,6 +117,53 @@ test('M2F.4 store ACL helper is best-effort (Windows-safe chmod)', () => {
   const d = ensureWaSessionDir(process.env.WA_SESSION_DIR);
   assert.ok(fs.existsSync(d));
   // chmod 0700 is attempted; on Windows the platform may ignore — existence is the portable contract
+});
+
+test('M2F.5 preview has no full-page 4s reload and a stable QR img src', async () => {
+  const prev = process.env.SENTINEL_PREVIEW_MONITOR;
+  process.env.SENTINEL_PREVIEW_MONITOR = '1';
+  try {
+    const r = await fetch(base + '/');
+    const html = await r.text();
+    assert.equal(r.status, 200);
+    assert.equal(html.includes('http-equiv="refresh"'), false);
+    assert.equal(html.includes('Date.now()'), false);
+    assert.equal(/\?t=\d{5,}/.test(html), false);
+    assert.match(html, /id="sess-qr"/);
+    assert.match(html, /data-src="\/session-qr\.png"/);
+    assert.match(html, /src="\/session-qr\.png"/);
+    assert.match(html, /session-status\.json/);
+    assert.equal(html.includes('SECRET-M2-QR'), false);
+  } finally {
+    if (prev === undefined) delete process.env.SENTINEL_PREVIEW_MONITOR;
+    else process.env.SENTINEL_PREVIEW_MONITOR = prev;
+  }
+});
+
+test('M2F.6 session-status.json has no QR payload; PNG 404 after pairing-hold', async () => {
+  const prev = process.env.SENTINEL_PREVIEW_MONITOR;
+  process.env.SENTINEL_PREVIEW_MONITOR = '1';
+  try {
+    const st = await fetch(base + '/session-status.json');
+    const body = await st.json();
+    assert.equal(st.status, 200);
+    assert.equal(body.state, 'NEEDS_QR');
+    assert.equal(body.qrAvailable, true);
+    assert.equal(JSON.stringify(body).includes('SECRET-M2-QR'), false);
+    sock.ev.emit('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 408 } } } });
+    const st2 = await fetch(base + '/session-status.json');
+    const body2 = await st2.json();
+    assert.equal(body2.qrAvailable, false);
+    assert.equal(body2.pairingHold, true);
+    const png = await fetch(base + '/session-qr.png');
+    assert.equal(png.status, 404);
+    const html = await (await fetch(base + '/')).text();
+    assert.match(html, /retry required|QR available: <b>no<\/b>/i);
+    assert.equal(html.includes('SECRET-M2-QR'), false);
+  } finally {
+    if (prev === undefined) delete process.env.SENTINEL_PREVIEW_MONITOR;
+    else process.env.SENTINEL_PREVIEW_MONITOR = prev;
+  }
 });
 
 test('ISO. owner unchanged', async () => {

@@ -472,9 +472,11 @@ test('M2QR.1 NEEDS_QR + 408 retains the SAME pairing socket (no reconnect)', asy
   current.ev.emit('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 408 } } } });
   await new Promise((r) => setTimeout(r, 50));
   assert.equal(adapter.getState().state, 'NEEDS_QR');
+  assert.equal(adapter.getState().qrAvailable, false);
+  assert.equal(adapter.getState().pairingHold, true);
+  assert.equal(adapter.takeQr({ role: 'OWNER' }), null);
   assert.equal(opens, 1, '408 during NEEDS_QR must not open a replacement socket');
   assert.equal(current, first);
-  assert.equal(adapter.takeQr({ role: 'OWNER' }), 'PAIR-QR-1');
 });
 
 test('M2QR.2 QR refresh stays on the same socket', async () => {
@@ -497,7 +499,7 @@ test('M2QR.2 QR refresh stays on the same socket', async () => {
   assert.equal(opens, 1);
 });
 
-test('M2QR.3 scan window remains valid after pairing 408 (same socket can CONNECTED)', async () => {
+test('M2QR.3 408 pairing-hold expires QR; same socket; owner retry for a fresh QR', async () => {
   let opens = 0;
   let current;
   const adapter = createSessionAdapter({
@@ -513,10 +515,18 @@ test('M2QR.3 scan window remains valid after pairing 408 (same socket can CONNEC
   current.ev.emit('connection.update', { qr: 'PAIR-QR-SCAN' });
   current.ev.emit('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 408 } } } });
   await new Promise((r) => setTimeout(r, 40));
-  assert.equal(adapter.getState().qrAvailable, true);
-  current.ev.emit('connection.update', { connection: 'open' });
-  assert.equal(adapter.getState().state, 'CONNECTED');
+  assert.equal(adapter.getState().qrAvailable, false);
+  assert.equal(adapter.getState().pairingHold, true);
   assert.equal(opens, 1);
+  await adapter.start();
+  assert.equal(opens, 1, 'preview/start during hold must not mint a socket');
+  adapter.resetAuth({ role: 'OWNER' });
+  await adapter.start();
+  current.ev.emit('connection.update', { qr: 'PAIR-QR-FRESH' });
+  assert.equal(adapter.getState().qrAvailable, true);
+  assert.equal(adapter.getState().pairingHold, false);
+  assert.equal(adapter.takeQr({ role: 'OWNER' }), 'PAIR-QR-FRESH');
+  assert.equal(opens, 2);
 });
 
 test('M2QR.4 CONNECTED + 408 still reconnects (pairing hold does not leak)', async () => {

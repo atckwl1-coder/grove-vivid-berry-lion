@@ -73,6 +73,7 @@ export function createSessionAdapter(opts = {}) {
   let stopped = true;
   let authLocked = false;
   let reconnectAttempts = 0;
+  let pairingHold = false;
 
   function clearReconnect() {
     if (reconnectTimer) {
@@ -100,6 +101,7 @@ export function createSessionAdapter(opts = {}) {
       qrSeq,
       creds: credsPresent(authDir),
       corrupted: isCorrupted(authDir),
+      pairingHold,
     };
   }
 
@@ -136,6 +138,7 @@ export function createSessionAdapter(opts = {}) {
     authLocked = false;
     reconnectAttempts = 0;
     qrSeq = 0;
+    pairingHold = false;
     forgetQr();
     clearReconnect();
     sock = null; // drop in-memory socket only — does not delete auth files
@@ -165,6 +168,7 @@ export function createSessionAdapter(opts = {}) {
             return;
           }
           qrPayload = String(qr);
+          pairingHold = false;
           machine.set('NEEDS_QR', 'library emitted qr');
           auditFn('SESSION_QR', { seq: qrSeq, available: true });
         }
@@ -190,7 +194,9 @@ export function createSessionAdapter(opts = {}) {
          * (resetAuth + start) is the only way to replace it. */
         if (machine.state === 'NEEDS_QR' && isPairingTimeout(status)) {
           clearReconnect();
-          auditFn('SESSION_PAIRING_HOLD', { status: 408, seq: qrSeq });
+          forgetQr();
+          pairingHold = true;
+          auditFn('SESSION_PAIRING_HOLD', { status: 408, seq: qrSeq, qrAvailable: false });
         } else {
           sock = null;
           if (authLocked || machine.state === 'AUTH_REQUIRED') {

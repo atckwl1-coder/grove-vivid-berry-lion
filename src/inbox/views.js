@@ -21,9 +21,84 @@ button.ghost{background:#fff;color:#075E54}
 .facts{background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:10px;font-size:13px;margin:10px 0}
 .err{background:#fee2e2;border:1px solid #fca5a5;padding:10px;border-radius:6px;margin:10px 0}
 .inf{background:#fff7ed;border:1px solid #fdba74;padding:8px;border-radius:6px;font-size:13px;margin:8px 0}
+.hero{font-size:28px;font-weight:700;letter-spacing:.04em;margin:8px 0 4px}
+.ok{background:#d1fae5;border:1px solid #6ee7b7;padding:10px;border-radius:6px;margin:10px 0}
 `;
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const actionId = () => `act-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+
+export function sessionMonitorPage(status = {}, { showQr = false, refresh = false, qrSrc = '/inbox/session/qr' } = {}) {
+  const st = String(status.state || 'STOPPED');
+  const mode = String(status.mode || 'DEMO');
+  const catchup = String(status.catchup || 'PENDING');
+  const qrAvail = Boolean(status.qrAvailable);
+  const pairingHold = Boolean(status.pairingHold);
+  const inbound = status.lastInbound || {};
+  const outbound = status.lastOutbound || {};
+  const identity = String(status.testIdentity || 'none');
+  const rpn = Boolean(status.receivedPendingNotifications);
+  const transport = String(status.transport || 'demo');
+  const kill = String(status.kill || '');
+  const connected = st === 'CONNECTED';
+  const bannerClass = connected ? 'ok' : (st === 'NEEDS_QR' || st === 'RECONNECTING' ? 'inf' : 'err');
+  const seq = Number(status.qrSeq || 0) || 0;
+  const qrBlock = showQr && qrAvail
+    ? `<p id="sess-qr-note">QR available (seq <span id="sess-seq">${esc(seq)}</span>). Scan with the dedicated <b>TEST</b> number only: WhatsApp → Linked devices → Link a device.</p><img id="sess-qr" alt="pairing QR" data-src="${esc(qrSrc)}" data-seq="${esc(seq)}" src="${esc(qrSrc)}">`
+    : `<p id="sess-qr-note">QR available: <b>${qrAvail ? 'yes' : 'no'}</b>${pairingHold ? ' — pairing timed out; OWNER retry required (stale QR not shown)' : (qrAvail ? ` (seq ${esc(seq)})` : '')}</p>${showQr ? `<img id="sess-qr" alt="pairing QR" data-src="${esc(qrSrc)}" data-seq="0" src="${esc(qrSrc)}" style="display:none">` : ''}`;
+  const poller = refresh ? `<script>
+(function(){
+  var img=document.getElementById('sess-qr');
+  var last=img?Number(img.getAttribute('data-seq')||0):0;
+  function setText(id,v){var n=document.getElementById(id); if(n) n.textContent=v;}
+  function tick(){
+    fetch('/session-status.json',{cache:'no-store'}).then(function(r){return r.json()}).then(function(s){
+      setText('sess-hero', s.state||'');
+      setText('sess-qr-flag', s.qrAvailable?'yes':'no');
+      setText('sess-seq', String(s.qrSeq||0));
+      setText('sess-catchup', (s.catchup||'')+' · RPN='+(s.receivedPendingNotifications?'true':'false'));
+      if(!img) return;
+      if(!s.qrAvailable){
+        img.style.display='none';
+        var note=document.getElementById('sess-qr-note');
+        if(note) note.textContent=s.pairingHold?'QR expired after pairing timeout. OWNER retry required. Do not scan a stale image.':'QR available: no';
+        return;
+      }
+      img.style.display='';
+      if(Number(s.qrSeq)!==last){
+        last=Number(s.qrSeq)||0;
+        img.setAttribute('data-seq', String(last));
+        img.src=(img.getAttribute('data-src')||'')+'?seq='+last;
+      }
+    }).catch(function(){});
+  }
+  setInterval(tick,4000);
+})();
+</script>` : '';
+  const instruction = st === 'NEEDS_QR'
+    ? `<div class=inf id="sess-help"><b>${pairingHold ? 'OWNER retry required' : 'Scan this QR'}</b> from the dedicated TEST WhatsApp: Linked devices → Link a device. Do not use the store customer-facing number.${pairingHold ? ' The previous QR is no longer valid.' : ''}</div>`
+    : `<div class=inf id="sess-help"><b>Send a test message</b> from a <em>second</em> WhatsApp account to the dedicated TEST number shown above (${esc(identity)}). One normal text. Do not send to the store customer-facing number.</div>`;
+  return `<!doctype html><html><head><meta charset=utf-8><title>Session · NOOR</title><style>${css}</style></head>
+<body>
+<header><b>🌙 NOOR session</b><span>${esc(transport)} · ${esc(mode)}</span><a href="/inbox">inbox</a></header>
+<div class=wrap>
+  <div class="${bannerClass}">
+    <div class=hero id="sess-hero">${esc(st)}</div>
+    <p>Sentinel mode: <b>${esc(mode)}</b> · transport: <b>${esc(transport)}</b> · creds: ${status.creds ? 'present' : 'missing'}</p>
+  </div>
+  <table>
+    <tr><th>Test identity</th><td>${esc(identity)}</td></tr>
+    <tr><th>QR available</th><td id="sess-qr-flag">${qrAvail ? 'yes' : 'no'}</td></tr>
+    <tr><th>Catch-up</th><td id="sess-catchup">${esc(catchup)} · RPN=${rpn ? 'true' : 'false'}</td></tr>
+    <tr><th>Kill switch</th><td>${esc(kill || '—')}</td></tr>
+    <tr><th>Last inbound</th><td>${esc(inbound.type || 'none')} · ${esc(inbound.result || 'none')} · ${esc(inbound.at || '—')}</td></tr>
+    <tr><th>Last outbound</th><td>${esc(outbound.type || 'none')} · ${esc(outbound.result || 'none')} · ${esc(outbound.at || '—')}</td></tr>
+  </table>
+  ${qrBlock}
+  ${instruction}
+  <p class=tag>QR payload, credentials, Signal keys, and message bodies are never shown here. CONNECTED is not CAUGHT_UP. SUBMITTED is not DELIVERED.</p>
+</div>${poller}</body></html>`;
+}
+
 const pill = (st) => `<span class="pill st-${esc(st)}">${esc(st)}</span>`;
 const slaBadge = (c) => {
   if (!c.slaStatus) return '<span class="sla-ok">—</span>';

@@ -23,6 +23,7 @@ export function publicSessionStatus() {
     qrAvailable: Boolean(snap.qrAvailable),
     qrSeq: snap.qrSeq || 0,
     creds: Boolean(snap.creds),
+    pairingHold: Boolean(snap.pairingHold),
     catchup: inbound.catchup || 'PENDING',
     receivedPendingNotifications: Boolean(inbound.receivedPendingNotifications),
     health,
