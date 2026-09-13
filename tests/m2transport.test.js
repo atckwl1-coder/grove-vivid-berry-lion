@@ -67,6 +67,7 @@ function mockSocket() {
   const handlers = {};
   const sock = {
     sent: [],
+    ended: false,
     ev: {
       on(name, fn) { (handlers[name] ||= []).push(fn); },
       emit(name, data) { for (const fn of handlers[name] || []) fn(data); },
@@ -77,7 +78,7 @@ function mockSocket() {
     },
     async sendPresenceUpdate() { return true; },
     async readMessages() { return true; },
-    async end() {},
+    async end() { sock.ended = true; },
   };
   return sock;
 }
@@ -663,6 +664,77 @@ test('M2QR.8 CONNECTED and AUTH_REQUIRED never expose QR; retryPairing is owner-
   assert.equal(adapter.getState().qrPhase, 'ACTIVE');
   assert.equal(adapter.getState().qrAvailable, true);
   assert.ok(opens >= 2);
+});
+
+test('M2QR.9 explicit retry ends the old socket before opening one new companion', async () => {
+  let opens = 0;
+  let inflight = 0;
+  let maxInflight = 0;
+  let current;
+  const sockets = [];
+  const adapter = createSessionAdapter({
+    authDir: process.env.WA_SESSION_DIR,
+    openSocket: async () => {
+      inflight += 1;
+      maxInflight = Math.max(maxInflight, inflight);
+      opens += 1;
+      await new Promise((r) => setTimeout(r, 15));
+      current = mockSocket();
+      sockets.push(current);
+      inflight -= 1;
+      return current;
+    },
+  });
+  await adapter.start();
+  const first = current;
+  first.ev.emit('connection.update', { qr: 'QR-ONE' });
+  assert.equal(opens, 1);
+  await adapter.retryPairing({ role: 'OWNER' });
+  const second = current;
+  assert.equal(first.ended, true);
+  assert.notEqual(first, second);
+  assert.equal(opens, 2);
+  first.ev.emit('connection.update', { qr: 'STALE-OLD-QR' });
+  assert.equal(adapter.takeQr({ role: 'OWNER' }), null);
+  first.ev.emit('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 408 } } } });
+  assert.notEqual(adapter.getState().state, 'RECONNECTING');
+  assert.notEqual(adapter.getState().qrPhase, 'EXPIRED');
+  second.ev.emit('connection.update', { qr: 'QR-TWO' });
+  assert.equal(adapter.getState().qrPhase, 'ACTIVE');
+  assert.equal(adapter.takeQr({ role: 'OWNER' }), 'QR-TWO');
+  await Promise.all([
+    adapter.retryPairing({ role: 'OWNER' }),
+    adapter.retryPairing({ role: 'OWNER' }),
+  ]);
+  assert.equal(maxInflight, 1, 'retries must not overlap factory calls');
+  const live = sockets.filter((s) => !s.ended);
+  assert.equal(live.length, 1, 'exactly one active pairing socket');
+});
+
+test('M2QR.10 CONNECTED start() does not mint another socket; creds intact', async () => {
+  const dir = process.env.WA_SESSION_DIR;
+  fs.mkdirSync(dir, { recursive: true });
+  const credsPath = path.join(dir, 'creds.json');
+  fs.writeFileSync(credsPath, JSON.stringify({ registered: true, dummy: 'keep' }));
+  const before = fs.readFileSync(credsPath, 'utf8');
+  let opens = 0;
+  let current;
+  const adapter = createSessionAdapter({
+    authDir: dir,
+    openSocket: async () => {
+      opens += 1;
+      current = mockSocket();
+      return current;
+    },
+  });
+  await adapter.start();
+  current.ev.emit('connection.update', { connection: 'open' });
+  await adapter.start();
+  await adapter.start();
+  assert.equal(adapter.getState().state, 'CONNECTED');
+  assert.equal(opens, 1);
+  assert.equal(adapter.getState().qrAvailable, false);
+  assert.equal(fs.readFileSync(credsPath, 'utf8'), before);
 });
 
 test('ISO. shipped owner files were not mutated', () => {

@@ -66,6 +66,10 @@ export function createSessionAdapter(opts = {}) {
   });
 
   let sock = null;
+  let companion = null;
+  let gen = 0;
+  let lastEnd = Promise.resolve();
+  let opChain = Promise.resolve();
   let qrPayload = null;
   let qrSeq = 0;
   let starting = false;
@@ -86,11 +90,45 @@ export function createSessionAdapter(opts = {}) {
     qrPayload = null;
   }
 
+  function isLiveSocket(socket, capturedGen) {
+    return Boolean(socket) && capturedGen === gen && socket === companion;
+  }
+
+  function bumpGeneration() {
+    gen += 1;
+    return gen;
+  }
+
+  function releaseSocket(old, reason) {
+    if (old && sock === old) sock = null;
+    if (old && companion === old) companion = null;
+    bumpGeneration();
+    if (!old) return lastEnd;
+    lastEnd = Promise.resolve()
+      .then(() => {
+        if (typeof old.end === 'function') return old.end();
+        if (old.ws && typeof old.ws.close === 'function') old.ws.close();
+        return null;
+      })
+      .catch(() => {});
+    auditFn('SESSION_SOCKET', { socket: 'RETIRED', reason: String(reason || 'release').slice(0, 80), gen });
+    return lastEnd;
+  }
+
+  async function enqueue(fn) {
+    const run = opChain.then(fn, fn);
+    opChain = run.catch(() => {});
+    return run;
+  }
+
   function lockAuth(reason) {
     authLocked = true;
     clearReconnect();
     forgetQr();
+    pairingHold = false;
+    const old = sock;
     sock = null;
+    releaseSocket(old, reason);
     machine.set('AUTH_REQUIRED', reason);
   }
 
@@ -150,23 +188,37 @@ export function createSessionAdapter(opts = {}) {
     pairingHold = false;
     forgetQr();
     clearReconnect();
-    sock = null; // drop in-memory socket only — does not delete auth files
+    const old = sock;
+    sock = null;
+    releaseSocket(old, 'owner reset auth lock');
     machine.set('STOPPED', 'owner reset auth lock');
     return publicState();
   }
 
-  /** Owner-only: resetAuth + start. Does not delete auth files. */
+  /** Owner-only: end current socket, then start exactly one new pairing companion. */
   async function retryPairing(actor) {
-    resetAuth(actor);
-    return start({ ownerRetry: true });
+    if (!actor || actor.role !== 'OWNER') {
+      const e = new Error('OWNER_ONLY');
+      e.code = 'OWNER_ONLY';
+      throw e;
+    }
+    return enqueue(async () => {
+      resetAuth(actor);
+      await lastEnd;
+      return start({ ownerRetry: true });
+    });
   }
 
   function attach(socket) {
+    if (companion && companion !== socket) bumpGeneration();
+    companion = socket;
     sock = socket;
+    const capturedGen = gen;
     const ev = socket?.ev;
     if (!ev || typeof ev.on !== 'function') return;
 
     ev.on('connection.update', (update = {}) => {
+      if (!isLiveSocket(socket, capturedGen)) return;
       const { connection, qr, lastDisconnect } = update;
 
       if (qr) {
@@ -190,6 +242,7 @@ export function createSessionAdapter(opts = {}) {
       }
 
       if (connection === 'open') {
+        if (!isLiveSocket(socket, capturedGen)) return;
         if (authLocked || terminalAuth(machine.state)) {
           forgetQr();
           sock = null;
@@ -204,17 +257,18 @@ export function createSessionAdapter(opts = {}) {
       }
 
       if (connection === 'close') {
+        if (!isLiveSocket(socket, capturedGen)) return;
         const status = closeStatus(lastDisconnect);
         /* Pairing window: 408 timedOut/connectionLost must NOT mint a new
          * companion. QR may still refresh on THIS socket. Owner retry
-         * (resetAuth + start) is the only way to replace it. */
+         * is the only way to replace it. */
         if (machine.state === 'NEEDS_QR' && isPairingTimeout(status)) {
           clearReconnect();
           forgetQr();
           pairingHold = true;
           auditFn('SESSION_PAIRING_HOLD', { status: 408, seq: qrSeq, qrAvailable: false });
         } else {
-          sock = null;
+          if (sock === socket) sock = null;
           if (authLocked || machine.state === 'AUTH_REQUIRED') {
             clearReconnect();
             forgetQr();
@@ -231,10 +285,11 @@ export function createSessionAdapter(opts = {}) {
         }
       }
 
-      if (typeof onConnection === 'function') onConnection(update);
+      if (isLiveSocket(socket, capturedGen) && typeof onConnection === 'function') onConnection(update);
     });
 
     ev.on('messages.upsert', (event) => {
+      if (!isLiveSocket(socket, capturedGen)) return;
       if (typeof onUpsert === 'function') {
         Promise.resolve(onUpsert(event)).catch((err) => {
           auditFn('SESSION_INBOUND_ADAPTER_ERROR', { error: String(err?.message || err).slice(0, 160) });
@@ -252,8 +307,10 @@ export function createSessionAdapter(opts = {}) {
       return;
     }
     const delay = reconnectMs * reconnectAttempts;
+    const capturedGen = gen;
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
+      if (capturedGen !== gen) return;
       if (stopped || authLocked || terminalAuth(machine.state)) return;
       start({ fromReconnect: true }).catch((err) => {
         if (!authLocked && machine.state !== 'AUTH_REQUIRED') {
@@ -275,16 +332,21 @@ export function createSessionAdapter(opts = {}) {
       machine.set('AUTH_REQUIRED', 'auth locked until owner reset');
       return publicState();
     }
-    /* Do not replace an active pairing companion. Owner resetAuth() first. */
+    if (!startOpts.ownerRetry && sock && machine.state === 'CONNECTED') {
+      return publicState();
+    }
+    /* Do not replace an active pairing companion. Owner retry only. */
     if (machine.state === 'NEEDS_QR' && !startOpts.ownerRetry) {
       return publicState();
     }
+    if (startOpts.ownerRetry) await lastEnd;
     stopped = false;
     if (starting) return publicState();
     starting = true;
     clearReconnect();
     if (!startOpts.fromReconnect) reconnectAttempts = 0;
     machine.set('STARTING', 'adapter start');
+    const capturedGen = gen;
     try {
       ensureWaSessionDir(authDir);
       const factory = openSocket || (await import('./librarySocket.js')).openLibrarySocket;
@@ -296,9 +358,8 @@ export function createSessionAdapter(opts = {}) {
       }
       machine.set('CONNECTING', credsPresent(authDir) ? 'restore existing creds' : 'fresh socket');
       const socket = await factory({ authDir: ensureWaSessionDir(authDir) });
-      if (authLocked || machine.state === 'AUTH_REQUIRED') {
-        try { if (socket?.end) socket.end(); } catch { /* */ }
-        sock = null;
+      if (authLocked || machine.state === 'AUTH_REQUIRED' || capturedGen !== gen) {
+        try { if (socket?.end) await socket.end(); } catch { /* */ }
         return publicState();
       }
       attach(socket);
@@ -317,11 +378,10 @@ export function createSessionAdapter(opts = {}) {
     stopped = true;
     clearReconnect();
     forgetQr();
-    try {
-      if (sock?.end) await sock.end();
-      else if (sock?.ws?.close) sock.ws.close();
-    } catch { /* stop is best-effort */ }
+    const old = sock;
     sock = null;
+    if (companion === old) companion = null;
+    await releaseSocket(old, 'adapter stop');
     if (authLocked || machine.state === 'AUTH_REQUIRED') {
       machine.set('AUTH_REQUIRED', 'stopped — auth still locked');
     } else {
