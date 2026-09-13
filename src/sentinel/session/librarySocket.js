@@ -38,21 +38,15 @@ export async function openLibrarySocket({ authDir } = {}) {
   const {
     default: makeWASocket,
     Browsers,
-    fetchLatestBaileysVersion,
     useMultiFileAuthState,
   } = lib;
 
   const { state, saveCreds } = await useMultiFileAuthState(authDir);
-  let version;
-  try {
-    version = (await fetchLatestBaileysVersion()).version;
-  } catch {
-    version = undefined;
-  }
 
   const sock = makeWASocket({
     auth: state,
-    version,
+    /* Handshake version is the library pin (6.7.24 baileys-version.json).
+     * Do not fetchLatest — M0 forbade a blind protocol upgrade. */
     browser: Browsers.ubuntu('Chrome'),
     printQRInTerminal: false,
     syncFullHistory: false,

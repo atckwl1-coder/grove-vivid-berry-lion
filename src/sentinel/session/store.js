@@ -28,6 +28,20 @@ export function credsPresent(dir) {
   }
 }
 
+/** Last-4 digits of the linked session identity. Never returns the full number or keys. */
+export function maskedMeIdentity(dir) {
+  const file = path.join(waSessionDir(dir), 'creds.json');
+  try {
+    const creds = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const raw = String(creds?.me?.id || '');
+    const digits = raw.split('@')[0].split(':')[0].replace(/\D/g, '');
+    if (digits.length >= 8) return `TEST …${digits.slice(-4)}`;
+    return credsPresent(dir) ? 'TEST (linked)' : 'none';
+  } catch {
+    return credsPresent(dir) ? 'TEST (linked)' : 'none';
+  }
+}
+
 export function markCorrupted(dir, note) {
   const d = ensureWaSessionDir(dir);
   const flag = path.join(d, 'CORRUPTED');

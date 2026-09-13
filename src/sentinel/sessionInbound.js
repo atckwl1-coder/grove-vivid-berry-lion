@@ -33,6 +33,15 @@
  */
 import { claimEvent } from './idempotency.js';
 import { audit } from './audit.js';
+import {
+  digitsFromJid,
+  isGroupJid,
+  isLidJid,
+  isStatusJid,
+  phoneFromSessionMessage,
+} from './session/jid.js';
+
+export { digitsFromJid, isGroupJid, isLidJid, isStatusJid, phoneFromSessionMessage };
 
 export const SESSION_CLAIM_PREFIX = 'sess:';
 export const UPSERT_NOTIFY = 'notify';
@@ -277,25 +286,6 @@ export function noteConnectionUpdate(update = {}) {
   return snapshot();
 }
 
-export function digitsFromJid(jid) {
-  if (jid == null) return null;
-  const s = String(jid).trim();
-  if (!s) return null;
-  const user = s.split('@')[0].split(':')[0];
-  const digits = user.replace(/\D/g, '');
-  if (!/^\d{8,15}$/.test(digits)) return null;
-  return digits;
-}
-
-export function isGroupJid(jid) {
-  return String(jid || '').includes('@g.us');
-}
-
-export function isStatusJid(jid) {
-  const s = String(jid || '');
-  return s === 'status@broadcast' || s.endsWith('@broadcast');
-}
-
 export function providerIdOf(msg) {
   const id = msg?.key?.id;
   return (typeof id === 'string' && id.length > 0) ? id : null;
@@ -319,8 +309,11 @@ export function normalizeSessionMessage(msg) {
   if (msg?.key?.fromMe) return { ok: false, reason: 'SKIP_FROM_ME', id };
   const jid = msg?.key?.remoteJid;
   if (isGroupJid(jid) || isStatusJid(jid)) return { ok: false, reason: 'SKIP_NON_CUSTOMER', id };
-  const from = digitsFromJid(jid);
-  if (!from) return { ok: false, reason: 'SKIP_BAD_JID', id };
+  const from = phoneFromSessionMessage(msg);
+  if (!from) {
+    if (isLidJid(jid)) return { ok: false, reason: 'SKIP_LID_UNRESOLVED', id };
+    return { ok: false, reason: 'SKIP_BAD_JID', id };
+  }
   if (isHistoryProtocol(msg)) return { ok: false, reason: 'SKIP_HISTORY', id };
 
   const body = msg?.message?.conversation

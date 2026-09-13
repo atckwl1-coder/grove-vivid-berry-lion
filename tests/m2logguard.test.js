@@ -100,6 +100,12 @@ test('M2G.5 committed evidence files contain no Signal key dumps', () => {
   }
 });
 
+test('M2G.7 library socket does not fetchLatest handshake version', () => {
+  const src = fs.readFileSync(path.join(process.cwd(), 'src/sentinel/session/librarySocket.js'), 'utf8');
+  assert.equal(src.includes('fetchLatestBaileysVersion'), false);
+  assert.match(src, /Do not fetchLatest/);
+});
+
 test('M2G.6 socket open without RPN does not become CAUGHT_UP', () => {
   resetSessionInboundState();
   noteConnectionUpdate({ connection: 'connecting', receivedPendingNotifications: false });

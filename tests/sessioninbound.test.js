@@ -401,6 +401,33 @@ test('SI25. state reset then catch-up: PENDING until RPN, then CAUGHT_UP', async
   assert.equal(stale.results[0].reason, 'SKIP_STALE_APPEND');
 });
 
+test('SI20. @lid without senderPn is not a phone and is not claimed', async () => {
+  inbound.resetSessionInboundState();
+  openPending();
+  const lid = '146973931888874@lid';
+  const { delivered, results } = await ingest({
+    type: 'notify',
+    messages: [msg({ id: '3EB0LID1', text: 'hi', jid: lid })],
+  });
+  assert.equal(results[0].accepted, false);
+  assert.equal(results[0].reason, 'SKIP_LID_UNRESOLVED');
+  assert.equal(delivered.length, 0);
+  assert.equal(inbound.digitsFromJid(lid), null);
+  assert.equal(claimEvent(inbound.sessionClaimId('3EB0LID1')), true, 'unresolved LID must remain replayable');
+});
+
+test('SI21. @lid with senderPn resolves to the PN and claims once', async () => {
+  inbound.resetSessionInboundState();
+  openPending();
+  const m = msg({ id: '3EB0LID2', text: 'reno 16 price?', jid: '146973931888874@lid' });
+  m.key.senderPn = '923001119999@s.whatsapp.net';
+  const { delivered, results } = await ingest({ type: 'notify', messages: [m] });
+  assert.equal(results[0].accepted, true);
+  assert.equal(delivered[0].from, '923001119999');
+  assert.equal(delivered[0].id, '3EB0LID2');
+  assert.equal(claimEvent(inbound.sessionClaimId('3EB0LID2')), false);
+});
+
 test('ISO. shipped owner files unchanged', () => {
   assert.deepEqual(shippedOwnerHashes(), hashesBefore);
 });

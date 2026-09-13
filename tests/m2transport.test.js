@@ -301,6 +301,8 @@ test('M2A.15 JID digits round-trip', () => {
   assert.equal(digitsFromJid('923001119999@s.whatsapp.net'), '923001119999');
   assert.equal(digitsToJid('923001119999'), '923001119999@s.whatsapp.net');
   assert.equal(digitsFromJid('120@g.us'), null);
+  assert.equal(digitsFromJid('146973931888874@lid'), null);
+  assert.equal(digitsToJid('146973931888874'), '146973931888874@s.whatsapp.net');
 });
 
 test('M2A.16 outbound through outbox uses session sendFn; firewall still required on facade', async () => {
