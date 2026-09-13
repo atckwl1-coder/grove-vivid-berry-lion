@@ -53,8 +53,9 @@ Owner catalog ritual: `node scripts/verify-catalog.mjs --verify` (24h TTL; stale
 
 ## Settled constraints
 
-- Reno 16 autonomous floor = **Rs. 186,800** exactly
-- Reno 16F floor = **UNRESOLVED** (do not guess)
+- Reno 16 autonomous floor = **Rs. 186,800** exactly (invoice **Rs. 199,999**)
+- Reno 16F autonomous floor = **Rs. 138,600** exactly (invoice **Rs. 149,999**)
+- Floors are last-resort. Do not volunteer them. Never quote below.
 - Kill switch and Action Firewall architecture stay
 - CAP-008 human fallback stays
 - Marketing = OFF

@@ -308,18 +308,19 @@ test('U4. deterministic EMI 85000 6 is unchanged', async () => {
   verdict('U4 EMI', 'emi 85000 6 still sends', 'asserted', 'normalization is not on every AI send', 'LIVE EMI disclosure');
 });
 
-test('R16. Reno 16 floor is 186800; 16F unresolved; 150000 is not the 16 floor', () => {
+test('R16. Reno 16 floor is 186800; 16F floor is 138600; 149999 is not the 16 floor', () => {
   const rules = loadRules();
   assert.equal(rules.products.reno16.floor, 186800);
   assert.equal(rules.products.reno16.floor_status, 'RESOLVED');
-  assert.equal(rules.products.reno16f.floor, null);
-  assert.equal(rules.products.reno16f.floor_status, 'UNRESOLVED');
+  assert.equal(rules.products.reno16f.floor, 138600);
+  assert.equal(rules.products.reno16f.floor_status, 'RESOLVED');
   const eng = fs.readFileSync(path.join(REPO, 'src/services/negotiation.js'), 'utf8');
-  assert.equal(/products\.reno16\.floor\s*=\s*150000/.test(eng), false);
+  assert.equal(/products\.reno16\.floor\s*=\s*149999/.test(eng), false);
   assert.equal(nf.validateMonetaryReply('Reno 16 Rs. 186,800').ok, true);
-  assert.equal(nf.validateMonetaryReply('Reno 16 Rs. 150,000').ok, false);
-  assert.equal(nf.validateMonetaryReply('Reno 16F Rs. 150,000').ok, true);
-  verdict('R16 floors', '186800 RESOLVED; 16F UNRESOLVED; 150000 not a 16 floor', 'asserted', 'owner file is still the floor authority', 'owner resolving 16F');
+  assert.equal(nf.validateMonetaryReply('Reno 16 Rs. 149,999').ok, false);
+  assert.equal(nf.validateMonetaryReply('Reno 16F Rs. 149,999').ok, true);
+  assert.equal(nf.validateMonetaryReply('Reno 16F Rs. 138,600').ok, true);
+  verdict('R16 floors', '186800 / 138600 RESOLVED; 149999 not a 16 floor', 'asserted', 'owner file is still the floor authority', 'LIVE dealer-price honouring');
 });
 
 test('T1. no QR/session implementation; D-010 is a decision record', () => {

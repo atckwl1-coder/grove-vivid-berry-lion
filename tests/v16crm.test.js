@@ -124,13 +124,19 @@ async function login(id, password) {
   return { status: r.status, cookie: `noor_session=${j?.sessionToken}`, csrf: j?.csrf, body: j };
 }
 
-test('I1. compare reno16 vs reno16f is catalog facts, no 186800', async () => {
+test('I1. compare reno16 vs reno16f is catalog facts, no floor leak', async () => {
   const phone = P();
   const r = await sendFlow(phone, 'reno16 vs reno16f');
   const t = textOf(r);
   assert.match(t, /Reno 16/);
-  assert.match(t, /UNRESOLVED/);
+  assert.match(t, /16F/);
+  assert.equal(t.includes('UNRESOLVED'), false);
   assert.equal(t.includes('186800'), false);
+  assert.equal(t.includes('186,800'), false);
+  assert.equal(t.includes('138600'), false);
+  assert.equal(t.includes('138,600'), false);
+  assert.match(t, /199,999/);
+  assert.match(t, /149,999/);
 });
 
 test('I2. product mention persists qualification curious/price_shopping', async () => {

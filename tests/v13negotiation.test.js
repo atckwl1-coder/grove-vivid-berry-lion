@@ -5,9 +5,9 @@
 //   "Best-price offers within floor" · "deterministic engine owns numbers;
 //    LLM may ONLY phrase; validator re-checks" · value before price ·
 //    a discount request does NOT automatically earn a discount ·
-//    floors: Reno 16 start 200,000 / floor 186,800 (RESOLVED) ·
-//    Reno 16F start 150,000 / floor range 139k–142k (UNRESOLVED —
-//    must NOT be guessed) · learning changes tactics ONLY, never
+//    floors: Reno 16 start 199,999 / floor 186,800 (RESOLVED) ·
+//    Reno 16F start 149,999 / floor 138,600 (RESOLVED) ·
+//    last-resort floor, never volunteered as the opening price · learning changes tactics ONLY, never
 //    authority · truth: no fabricated scarcity/urgency/approval/
 //    competitor prices/benefits; no unsupported Google duration claims.
 //
@@ -161,28 +161,33 @@ function verdict(name, expected, actual, proves, noProve) {
 }
 
 const FLOOR = 186800;
-const START = 200000;
+const START = 199999;
 const STEP = 2000;
+const FLOOR_16F = 138600;
+const START_16F = 149999;
+const STEP_16F = 1500;
 const VALUE_SET = new Set(['SK-01', 'SK-02', 'SK-03', 'SK-04', 'SK-05', 'SK-06', 'SK-07', 'SK-08']);
+const DEALER_LEAK = /dealer|dealer[- ]price|cost structure|invoice[- ]cost/i;
 
 // ═══ PRICE AUTHORITY ═══
 
-test('N1. exact starting prices from the catalog (200,000 / 150,000), dated VERIFIED', async () => {
+test('N1. exact starting prices from the catalog (199,999 / 149,999), dated VERIFIED', async () => {
   const phone = P();
   const menu = await sendFlow(phone, 'menu_phones');
   const t = textOf(menu);
-  assert.ok(t.includes('Rs. 200,000* (verified '), 'Reno 16 exact starting price, dated');
-  assert.ok(t.includes('Rs. 150,000* (verified '), 'Reno 16F exact starting price, dated');
+  assert.ok(t.includes('Rs. 199,999* (verified '), 'Reno 16 exact invoice, dated');
+  assert.ok(t.includes('Rs. 149,999* (verified '), 'Reno 16F exact invoice, dated');
   assert.ok(t.includes('stock: n/a'), 'no stock supplied → no stock claim (never fabricated)');
-  verdict('N1 starting prices', 'exact owner-supplied prices, dated, no fabricated stock', 'asserted', 'price truth comes from the owner catalog (V1-2), not the negotiation engine', 'physical availability (no stock data supplied for these models)');
+  assert.equal(DEALER_LEAK.test(t), false, 'menu does not disclose dealer terms');
+  verdict('N1 starting prices', 'exact owner-supplied invoices, dated, no fabricated stock', 'asserted', 'price truth comes from the owner catalog (V1-2), not the negotiation engine', 'physical availability (no stock data supplied for these models)');
 });
 
-test('N2+N3. full-range Reno 16 negotiation: 200,000 → step ladder → EXACTLY 186,800 floor; never below', async () => {
+test('N2+N3. full-range Reno 16 negotiation: 199,999 → step ladder → EXACTLY 186,800 floor; never below', async () => {
   const phone = P();
   const replies = [];
   await sendFlow(phone, 'reno16 bohat zyada hai'); // turn 1: value-first (no number move)
   replies.push(textOf(toPhone(phone).slice(-1)[0]));
-  const expected = [198000, 196000, 194000, 192000, 190000, 188000, 186800];
+  const expected = [197999, 195999, 193999, 191999, 189999, 187999, 186800];
   for (let i = 0; i < 7; i++) {
     const r = await sendFlow(phone, 'sasta karo');
     replies.push(textOf(r));
@@ -240,33 +245,39 @@ test('N5. missing floor (product not in rules) → no autonomous discount', asyn
   verdict('N5 missing floor', 'VERIFIED price restated, zero autonomous discount', 'asserted', 'negotiation authority exists only where the owner granted it (per product)', 'that the owner intends no discount on other models (absence = no authority, not a policy)');
 });
 
-test('N6. Reno 16F UNRESOLVED floor (139k–142k range) → NEVER guessed', async () => {
+test('N6. Reno 16F RESOLVED floor 138,600 — above-floor steps allowed; never below; never dealer terms', async () => {
   const phone = P();
   const r1 = await sendFlow(phone, 'reno16f sasta karo');
-  const r2 = await sendFlow(phone, '140 k mein de do');
-  const r3 = await sendFlow(phone, '139000 karo');
+  assert.equal(n(phone).concessions, 0, 'first 16F price push is value-first, not the floor');
+  assert.ok(nums(textOf(r1)).every((x) => x >= START_16F), 'turn 1 stays at invoice');
+  const r2 = await sendFlow(phone, 'sasta karo');
+  const n2 = nums(textOf(r2));
+  assert.ok(n2.includes(START_16F - STEP_16F), 'one 1% step after value');
+  assert.ok(n2.every((x) => x >= FLOOR_16F), 'never below 138600');
+  const r3 = await sendFlow(phone, '130000 karo');
   const all = nums(textOf(r1) + ' ' + textOf(r2) + ' ' + textOf(r3));
-  assert.ok(all.every((x) => x >= 150000), 'no number below the 150,000 starting price (got ' + all + ')');
-  assert.ok(!all.includes(139000) && !all.includes(140000) && !all.includes(141000) && !all.includes(142000), 'none of the range values guessed as a price');
-  assert.ok(textOf(r1).includes('staff'), 'unresolved floor → staff path');
-  assert.equal(n(phone).concessions, 0, 'zero concessions while the floor is unresolved');
-  verdict('N6 unresolved floor', 'range ≠ authority; no 139/140/141/142k guess', 'asserted', 'the engine treats an owner range as NOT a floor — the mandated do-not-guess rule', 'that the owner will resolve the exact floor (human decision, recorded as open)');
+  assert.ok(all.every((x) => x >= FLOOR_16F), 'below-floor bid never quoted below 138600 (got ' + all + ')');
+  assert.ok(!all.includes(130000), '130000 never offered');
+  const blob = textOf(r1) + textOf(r2) + textOf(r3);
+  assert.equal(DEALER_LEAK.test(blob), false);
+  verdict('N6 16F resolved floor', '138600 is last-resort authority; never below; no dealer leak', 'asserted', 'owner resolved B-7 exactly; engine reads the file', 'that every 16F customer will reach the floor (most should close above)');
 });
 
 // ═══ NEGOTIATION BEHAVIOR ═══
 
-test('N7. ready-to-buy at the listed price → close at 200,000, ZERO concessions', async () => {
+test('N7. ready-to-buy at the listed price → close at 199,999, ZERO concessions', async () => {
   const phone = P();
-  const r = await sendFlow(phone, 'reno16 200000 mein hi le raha hoon, payment karta hoon');
+  const r = await sendFlow(phone, 'reno16 199999 mein hi le raha hoon, payment karta hoon');
   const t = textOf(r);
-  assert.ok(t.includes('Rs. 200,000* par fix'), 'closed at the highest approved price');
+  assert.ok(t.includes('Rs. 199,999* par fix'), 'closed at the highest approved price');
   const st = n(phone);
   assert.equal(st.state, 'CLOSED');
   assert.equal(st.concessions, 0, 'no discount for a ready customer');
   const rec = negotiationOutcomes().filter((x) => x.phone === phone).at(-1);
   assert.equal(rec.outcome, 'sale');
-  assert.equal(rec.final_offer, 200000);
+  assert.equal(rec.final_offer, 199999);
   assert.equal(rec.discount_amount, 0, 'zero discount realized');
+  assert.equal(DEALER_LEAK.test(t), false);
   verdict('N7 close at listed price', 'ready customer → immediate close, 0 concessions', 'asserted', 'the objective is the highest approved close, not maximum discount', 'that the customer actually pays (verification=customer_statement; no payment system)');
 });
 
@@ -288,7 +299,7 @@ test('N9. controlled concession: after value + explicit request → exactly one 
   await sendFlow(phone, 'reno16 zyada hai'); // value turn
   const r = await sendFlow(phone, 'sasta karo'); // explicit request → ONE step
   const t = textOf(r);
-  assert.ok(t.includes('Rs. 198,000'), 'step = 200,000 − 1% (2,000) = 198,000');
+  assert.ok(t.includes('Rs. 197,999'), 'step = 199,999 − 1% (2,000) = 197,999');
   assert.equal(nums(t).length, 1, 'exactly one new number per turn');
   assert.equal(n(phone).concessions, 1, 'at most one concession per customer turn');
   verdict('N9 controlled concession', 'one 1% step per turn, after value-first', 'asserted', 'concessions are bounded, motivated, minimized (deterministic step, owner-tunable policy)', 'that the step size is optimal for margin (owner may retune policy)');
@@ -319,16 +330,16 @@ test('N11. repeated bargaining → strictly decreasing, one step each, stops at 
   for (let i = 1; i < offers.length - 1; i++) assert.equal(offers[i], offers[i - 1] - STEP, 'monotone −1 step');
   assert.ok(offers[offers.length - 1] < offers[offers.length - 2], 'final step descends');
   assert.equal(offers[offers.length - 1], FLOOR, 'final step clamps exactly to the floor');
-  assert.deepEqual(offers, [198000, 196000, 194000, 192000, 190000, 188000, 186800]);
+  assert.deepEqual(offers, [197999, 195999, 193999, 191999, 189999, 187999, 186800]);
   verdict('N11 monotone ladder', 'deterministic 1%-step descent to the floor', 'asserted', 'no oscillation, no jumps, no below-floor (validator-level determinism)', 'that every step was "motivated" in the psychological sense (context gates exist: value-first / explicit request / bid)');
 });
 
 test('N12. explicit price-to-pay within one step → accept at the customer number (pays now)', async () => {
   const phone = P();
   const r = await sendFlow(phone, 'reno16 199000 mein payment karta hoon');
-  assert.ok(textOf(r).includes('Rs. 199,000* par fix'), 'accepted 199,000 (gap 1,000 ≤ one step, pays now)');
+  assert.ok(textOf(r).includes('Rs. 199,000* par fix'), 'accepted 199,000 (gap 999 ≤ one step, pays now)');
   assert.equal(n(phone).state, 'CLOSED');
-  assert.equal(negotiationOutcomes().filter((x) => x.phone === phone).at(-1).discount_amount, 1000, 'exactly the necessary concession');
+  assert.equal(negotiationOutcomes().filter((x) => x.phone === phone).at(-1).discount_amount, 999, 'exactly the necessary concession');
   verdict('N12 accept within one step', 'conversion at the smallest gap', 'asserted', 'close logic prefers realized price: stated willingness-to-pay within a step is accepted instead of re-bargaining', 'that the payment completes in-store (no payment system)');
 });
 
@@ -336,7 +347,7 @@ test('N13. explicit bid far below → bounded counter, never a jump to the floor
   const phone = P();
   const r = await sendFlow(phone, 'reno16 190000 mein le raha hoon');
   const t = textOf(r);
-  assert.ok(t.includes('Rs. 198,000'), 'counter at one step (198,000) — not 190,000, not the floor');
+  assert.ok(t.includes('Rs. 197,999'), 'counter at one step (197,999) — not 190,000, not the floor');
   assert.ok(!t.includes('190,000') && !t.includes('186,800'), 'neither the low bid nor the floor volunteered');
   assert.equal(nums(t).length, 1, 'one number only');
   verdict('N13 far-bid counter', 'bounded counter toward the customer, max price preserved', 'asserted', 'the engine concedes minimally per turn toward a stated bid (highest realistic close)', 'that the customer will follow to the floor (they may walk — tracked as outcome)');
@@ -347,9 +358,9 @@ test('N14. below-floor request from the start → bounded counter (never 180,000
   const r1 = await sendFlow(phone, 'reno16 180000 mein de do');
   const t1 = textOf(r1);
   assert.ok(!t1.includes('180,000'), 'the below-floor number is never offered');
-  assert.ok(t1.includes('Rs. 198,000'), 'counter at the next step');
+  assert.ok(t1.includes('Rs. 197,999'), 'counter at the next step');
   const r2 = await sendFlow(phone, '180 k karo');
-  assert.ok(textOf(r2).includes('Rs. 196,000'), 'second bounded counter');
+  assert.ok(textOf(r2).includes('Rs. 195,999'), 'second bounded counter');
   const all = nums(t1 + ' ' + textOf(r2));
   assert.ok(all.every((x) => x >= FLOOR), 'every quoted number ≥ floor');
   verdict('N14 below-floor request', 'below-floor numbers are refused; bounded descent only', 'asserted', '"never below 186,800" holds even under direct below-floor pressure', 'floor behavior under a 3rd+ push (covered by the escalation test N26)');
@@ -358,7 +369,7 @@ test('N14. below-floor request from the start → bounded counter (never 180,000
 test('N15. customer walks away → LOST, no-sale outcome recorded, no numbers', async () => {
   const phone = P();
   await sendFlow(phone, 'reno16 zyada hai');
-  await sendFlow(phone, 'sasta karo'); // 198,000
+  await sendFlow(phone, 'sasta karo'); // 197,999
   const r = await sendFlow(phone, 'na chahiye, phir baat karte hain');
   const t = textOf(r);
   assert.equal(nums(t).length, 0, 'no price in the farewell');
@@ -367,20 +378,20 @@ test('N15. customer walks away → LOST, no-sale outcome recorded, no numbers', 
   assert.equal(st.active, false);
   const rec = negotiationOutcomes().filter((x) => x.phone === phone).at(-1);
   assert.equal(rec.outcome, 'no_sale');
-  assert.equal(rec.final_offer, 198000, 'last authorized position recorded');
+  assert.equal(rec.final_offer, 197999, 'last authorized position recorded');
   verdict('N15 walk-away', 'LOST state + honest no-sale record at the last authorized position', 'asserted', 'outcomes are captured from engine events (no fabrication); the last position is retained for re-close', 'that the customer is genuinely lost (may return — next test)');
 });
 
-test('N16. return after walk → re-open at the LAST authorized position (198,000), not the start', async () => {
+test('N16. return after walk → re-open at the LAST authorized position (197,999), not the start', async () => {
   const phone = P();
   await sendFlow(phone, 'reno16 zyada hai');
-  await sendFlow(phone, 'sasta karo'); // 198,000
-  await sendFlow(phone, 'na chahiye'); // LOST @198,000
+  await sendFlow(phone, 'sasta karo'); // 197,999
+  await sendFlow(phone, 'na chahiye'); // LOST @197,999
   const r = await sendFlow(phone, 'reno16 wapis aaya hoon, le raha hoon');
-  assert.ok(textOf(r).includes('Rs. 198,000* par fix'), 're-closed at the last authorized position');
+  assert.ok(textOf(r).includes('Rs. 197,999* par fix'), 're-closed at the last authorized position');
   assert.equal(n(phone).state, 'CLOSED');
   assert.ok(n(phone).skills_used.includes('SK-11'), 're-close skill logged');
-  assert.equal(negotiationOutcomes().filter((x) => x.phone === phone).at(-1).final_offer, 198000);
+  assert.equal(negotiationOutcomes().filter((x) => x.phone === phone).at(-1).final_offer, 197999);
   verdict('N16 re-close', 'no reopening above the last position; no new authority', 'asserted', 're-close uses the recorded last authorized offer (deterministic, file-backed)', 'that the re-open price holds over days (it does — state is persisted; staleness of the underlying catalog still applies per V1-2)');
 });
 
@@ -388,12 +399,12 @@ test('N17. sale outcome record = exact structured data (start/final/discount/ski
   const phone = P();
   await sendFlow(phone, 'reno16 zyada hai');
   await sendFlow(phone, 'sasta karo');
-  await sendFlow(phone, 'theek hai, le raha hoon'); // close @198,000
+  await sendFlow(phone, 'theek hai, le raha hoon'); // close @197,999
   const rec = negotiationOutcomes().filter((x) => x.phone === phone).at(-1);
   assert.equal(rec.product, 'reno16');
   assert.equal(rec.outcome, 'sale');
-  assert.equal(rec.start, 200000);
-  assert.equal(rec.final_offer, 198000);
+  assert.equal(rec.start, 199999);
+  assert.equal(rec.final_offer, 197999);
   assert.equal(rec.discount_amount, 2000);
   assert.ok(Array.isArray(rec.skills) && rec.skills.includes('SK-02') && rec.skills.includes('SK-09') && rec.skills.includes('SK-10'), 'skill sequence captured');
   assert.equal(rec.verification, 'customer_statement', 'honest verification label (no payment system)');
@@ -462,7 +473,7 @@ test('N22. chain terminates early: value → ready → close with zero concessio
   const phone = P();
   await sendFlow(phone, 'reno16 zyada hai');
   const r = await sendFlow(phone, 'haan theek, le raha hoon');
-  assert.ok(textOf(r).includes('Rs. 200,000* par fix'), 'closed after value, at the starting price');
+  assert.ok(textOf(r).includes('Rs. 199,999* par fix'), 'closed after value, at the starting price');
   const st = n(phone);
   assert.equal(st.concessions, 0, 'no unnecessary negotiation');
   assert.equal(st.skills_used.at(-1), 'SK-10', 'closing skill is the last in the chain');
@@ -483,7 +494,7 @@ test('N24. historical performance is recorded correctly (skillStats from real ou
   const phone = P();
   await sendFlow(phone, 'reno16 zyada hai');
   await sendFlow(phone, 'sasta karo');
-  await sendFlow(phone, 'theek hai le raha hoon'); // sale @198,000
+  await sendFlow(phone, 'theek hai le raha hoon'); // sale @197,999
   const stats = neg.skillStats();
   assert.ok(stats['SK-10'] && stats['SK-10'].uses >= 1 && stats['SK-10'].wins >= 1, 'closing skill counted on a sale');
   assert.ok(stats['SK-02'] && stats['SK-02'].uses >= 1 && stats['SK-02'].wins >= 1, 'value skill counted on a sale');

@@ -8,6 +8,6 @@
 | B-4 | DEBT-18 customers-DB sensitive-zone controls | PII posture hardening | 2026-09-07 | Access controls + retention on message store |
 | B-5 | DEBT-19 Secure-cookie + login rate-limit | any internet exposure of inbox | 2026-09-08 | TLS + Secure flag + throttling before public deploy |
 | B-6 | DEBT-20 scheduler owner-brief misclass (AI vs SYSTEM_ALERT) | classification purity (no behavior delta today) | 2026-09-08 | reclassify when operate-layer work is authorized |
-| B-7 | **Owner has not resolved the exact Reno 16F negotiation floor** (supplied range 139,000–142,000; engine is forbidden from guessing) | Autonomous concession on `reno16f` only — the engine sells it at the 150,000 verified price with an honest staff path until resolved | 2026-09-10 | owner sets `products.reno16f.floor` to an exact number + `floor_status: "RESOLVED"` in `src/data/negotiation-rules.json` (owner edit; the bot/learning cannot write this file) |
+| B-7 | **CLOSED 2026-09-13** — owner resolved Reno 16F floor = **138600** exactly (invoice 149999). Reno 16 remains invoice 199999 / floor 186800. | Autonomous concession on `reno16f` is now allowed down to 138600, never below | 2026-09-10 | done: `products.reno16f.floor = 138600`, `floor_status: "RESOLVED"` |
 
 **CAP-006 reservations: OFF. CAP-007 marketing: OFF.** (fast-track law until their gates exist)

@@ -1,22 +1,23 @@
 {
-  "note": "OWNER-APPROVED NEGOTIATION AUTHORITY (V1-3, 2026-09-10). Owner-edit ONLY — the bot, the engine, and the learning system NEVER write this file (learning changes tactics; owner rules change authority). floor_status=RESOLVED: exact autonomous floor owner-decided — the engine may negotiate from the catalog (starting) price down to this floor and NEVER below. floor_status=UNRESOLVED: owner supplied a range but not the exact floor — NO autonomous concession for that product until the owner resolves it (starting price only + staff path; the engine must not guess).",
+  "note": "OWNER-APPROVED NEGOTIATION AUTHORITY. Owner-edit ONLY — the bot, the engine, and the learning system NEVER write this file (learning changes tactics; owner rules change authority). floor_status=RESOLVED: exact autonomous floor owner-decided — the engine may negotiate from the catalog (invoice) price down to this floor and NEVER below. floor_status=UNRESOLVED: NO autonomous concession until the owner resolves it. Dealer-price floors are LAST-RESORT. Do not volunteer them. Do not disclose dealer/cost terminology to the customer. Do not default to the floor. Close above floor whenever conversation evidence allows.",
   "version": 1,
   "policy": {
     "concession_step_pct": 1.0,
     "max_concessions_per_turn": 1,
-    "value_before_concession": true
+    "value_before_concession": true,
+    "floor_is_last_resort": true,
+    "disclose_dealer_terms": false
   },
   "products": {
     "reno16": {
       "floor": 186800,
       "floor_status": "RESOLVED",
-      "note": "Owner-supplied 2026-09-10: selling price PKR 200,000 (catalog is the single price source); dealer price PKR 186,800; business intent = try to sell above dealer price and do not reduce into the dealer-price level. Authorized autonomous floor = PKR 186,800 (the explicitly supplied dealer-price boundary — never derived/rounded/altered); never offer below. (Corrected 2026-09-10 per owner authority instruction — supersedes the previously mis-recorded 186,499; see VR-2026-09-10-02.)"
+      "note": "Owner-supplied 2026-09-13: invoice/catalog PKR 199999; dealer-price / absolute autonomous floor PKR 186800 exactly (never derived/rounded/altered). Business intent = make a strong attempt to close ABOVE 186800 using owner-approved value (warranty, replacement protection, S Care, gifting, store experience). Floor is last-resort after value + bounded 1% steps fail and the customer still refuses. Never offer below 186800. Never volunteer the floor as the opening price. Never say dealer/cost/invoice-cost to the customer."
     },
     "reno16f": {
-      "floor": null,
-      "floor_status": "UNRESOLVED",
-      "owner_range": [139000, 142000],
-      "note": "Owner-supplied 2026-09-10: starting/customer price PKR 150,000 (catalog); floor range 139,000-142,000 — exact floor PENDING OWNER DECISION. Do not guess 139k/140k/141k/142k: until resolved, no autonomous concession for this model."
+      "floor": 138600,
+      "floor_status": "RESOLVED",
+      "note": "Owner-supplied 2026-09-13: invoice/catalog PKR 149999; dealer-price / absolute autonomous floor PKR 138600 exactly (never derived/rounded/altered). Supersedes the prior UNRESOLVED range 139000-142000 (B-7 closed by owner). Same last-resort rule as Reno 16. Never offer below 138600. Never volunteer the floor as the opening price. Never say dealer/cost to the customer. No extra 16F benefits invented — only catalog facts + store policies already in products.json."
     }
   }
 }

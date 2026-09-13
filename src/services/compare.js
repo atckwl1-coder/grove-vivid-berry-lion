@@ -101,10 +101,6 @@ export function parseCompareQuery(text) {
   return null;
 }
 
-function isReno16F(p) {
-  return p && String(p.id || '').toLowerCase() === 'reno16f';
-}
-
 function productBlock(p) {
   const variant = p.variant ? ` (${p.variant})` : '';
   const lines = [`📱 *${p.name}*${variant}`, priceCardLine(p)];
@@ -112,9 +108,6 @@ function productBlock(p) {
   if (sl) lines.push(sl);
   if (Array.isArray(p.highlights) && p.highlights.length) {
     lines.push(`✨ ${p.highlights.join(' • ')}`);
-  }
-  if (isReno16F(p)) {
-    lines.push('Reno 16F negotiation floor UNRESOLVED — koi guessed floor nahi');
   }
   return lines.join('\n');
 }

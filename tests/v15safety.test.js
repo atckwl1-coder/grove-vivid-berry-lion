@@ -141,15 +141,15 @@ function verdict(name, expected, actual, proves, noProve) {
 }
 
 const FLOOR = 186800;
-const START = 200000;
+const START = 199999;
 
 // ═══ DEBT-07 number firewall (unit) ═══
 
 test('NF1. valid catalog price is allowed', () => {
-  const r = nf.validateMonetaryReply('Reno 16 ki price Rs. 200,000 hai');
+  const r = nf.validateMonetaryReply('Reno 16 ki price Rs. 199,999 hai');
   assert.equal(r.ok, true);
   assert.ok(r.amounts.includes(START));
-  verdict('NF1 catalog price', 'Rs. 200,000 allowed', 'ok', 'catalog price is an authorized value', 'that a live model will quote it');
+  verdict('NF1 catalog price', 'Rs. 199,999 allowed', 'ok', 'catalog price is an authorized value', 'that a live model will quote it');
 });
 
 test('NF2. valid current negotiation offer is allowed', () => {
@@ -168,7 +168,7 @@ test('NF3. valid floor 186,800 is allowed', () => {
 
 test('NF4. valid EMI amount is allowed', () => {
   const monthly = [...emiNumericSet(START)];
-  assert.ok(monthly.includes(39333), '6-month monthly for 200000 @ 3% is 39333');
+  assert.ok(monthly.includes(39333), '6-month monthly for 199999 @ 3% still rounds to 39333');
   const r = nf.validateMonetaryReply('6 mahine EMI Rs. 39,333 /mahina');
   assert.equal(r.ok, true);
   verdict('NF4 EMI', 'computed EMI monthly allowed', 'ok', 'EMI math from catalog price is authorized', 'a customer-invented tenor');
@@ -202,7 +202,7 @@ test('NF8. malicious/jailbroken LLM output is rejected', () => {
 });
 
 test('NF9. mixed valid + invalid numbers are rejected', () => {
-  const r = nf.validateMonetaryReply('Catalog Rs. 200,000 lekin aapke liye Rs. 180,000');
+  const r = nf.validateMonetaryReply('Catalog Rs. 199,999 lekin aapke liye Rs. 180,000');
   assert.equal(r.ok, false);
   assert.ok(r.rejected.some((x) => x.value === 180000));
   verdict('NF9 mixed', 'one bad number fails the whole reply', 'rejected', 'partially-true replies cannot smuggle a below-floor offer', 'benign mentions of the customer bid (fail-closed)');
@@ -245,7 +245,7 @@ test('R1. "reno16 ki price?" uses the deterministic catalog/negotiation path, no
   llmPayload = { reply: 'I will invent Rs. 111,111', handoff: false, intent: 'price_query' };
   const r = await sendFlow(phone, 'reno16 ki price?');
   const t = textOf(r);
-  assert.ok(t.includes('Rs. 200,000'), 'catalog starting price');
+  assert.ok(t.includes('Rs. 199,999'), 'catalog starting price');
   assert.ok(/verified/.test(t), 'dated catalog line');
   assert.ok(!t.includes('111,111'), 'LLM invention never sent');
   assert.equal(cust.getCustomer(phone)?.stateData?.negotiation?.active, undefined, 'plain price query does not open a concession session');
@@ -253,13 +253,13 @@ test('R1. "reno16 ki price?" uses the deterministic catalog/negotiation path, no
   void beforeJobs;
 });
 
-test('R2. Reno 16F remains unresolved (no guessed floor on a price question)', async () => {
+test('R2. Reno 16F price question restates invoice 149,999; does not volunteer floor 138,600', async () => {
   const phone = P();
   const r = await sendFlow(phone, 'reno16f kitne ka hai?');
   const t = textOf(r);
-  assert.ok(t.includes('Rs. 150,000'), 'starting price only');
-  assert.ok(!/139,?000|140,?000|141,?000|142,?000/.test(t), 'range not guessed');
-  verdict('R2 16F unresolved', 'price question restates start; no guessed floor', 'asserted', 'UNRESOLVED floor still has no autonomous concession', 'owner resolving the floor');
+  assert.ok(t.includes('Rs. 149,999'), 'invoice only');
+  assert.ok(!/138,?600/.test(t), 'floor not volunteered on a price question');
+  verdict('R2 16F invoice', 'price question restates start; floor is last-resort not a quote', 'asserted', 'catalog path does not dump dealer floor', 'LIVE catalog freshness');
 });
 
 // ═══ Customer DB durability ═══
@@ -589,15 +589,15 @@ test('NF15. deterministic EMI customer-stated principal is not blocked by the mo
   verdict('NF15 EMI untouched', 'emi 85000 6 still sends', 'asserted', 'content validation is not on every AI send', 'LIVE provider EMI disclosure accuracy');
 });
 
-test('NF16. exclusive "Reno 16 Rs. 150,000" is rejected; 16F wording still allows 150000', () => {
-  const r = nf.validateMonetaryReply('Reno 16 Rs. 150,000');
+test('NF16. exclusive "Reno 16 Rs. 149,999" is rejected; 16F wording still allows 149999', () => {
+  const r = nf.validateMonetaryReply('Reno 16 Rs. 149,999');
   assert.equal(r.ok, false, '16F catalog price cannot be quoted as exclusive Reno 16');
   assert.equal(r.reason, 'CROSS_SKU_AMOUNT');
-  const sixteenF = nf.validateMonetaryReply('Reno 16F Rs. 150,000');
-  assert.equal(sixteenF.ok, true, '16F starting price remains authorized for 16F wording');
+  const sixteenF = nf.validateMonetaryReply('Reno 16F Rs. 149,999');
+  assert.equal(sixteenF.ok, true, '16F invoice remains authorized for 16F wording');
   const floor = nf.validateMonetaryReply('Reno 16 Rs. 180,000');
   assert.equal(floor.ok, false, '180000 is still rejected — not in the allow-set');
-  verdict('NF16 context-binding', 'exclusive Reno 16 + 150000 rejected; 16F 150000 allowed; 180000 rejected', 'asserted', 'small local Reno 16 exclusive check, not a full SKU-bound redesign', 'other cross-SKU collisions (A3x 34999, trade-in 8000)');
+  verdict('NF16 context-binding', 'exclusive Reno 16 + 149999 rejected; 16F 149999 allowed; 180000 rejected', 'asserted', 'small local Reno 16 exclusive check, not a full SKU-bound redesign', 'other cross-SKU collisions (A3x 34999, trade-in 8000)');
 });
 
 test('NF17. photo/LLM sites in brain.js go through deliverModelOutput; no direct analysis sendText', () => {

@@ -49,10 +49,10 @@
     {
       "id": "reno16",
       "name": "OPPO Reno 16",
-      "price": 200000,
+      "price": 199999,
       "observed_at": "2026-09-10T10:00:00Z",
-      "verified_price": 200000,
-      "note": "Owner-supplied price 2026-09-10 (V1-3). Stock not supplied — no stock field = no stock claim (never fabricated).",
+      "verified_price": 199999,
+      "note": "Owner-supplied invoice 2026-09-13: PKR 199999 exactly. Stock not supplied — no stock field = no stock claim (never fabricated). Autonomous floor lives in negotiation-rules.json (186800), never quoted as the opening price.",
       "benefits": [
         { "id": "gift_box", "claim": "Premium Reno series official gifting box included hai" },
         { "id": "replacement_3m", "claim": "manufacturing fault par 3 mahine ka phone replacement protection" },
@@ -65,10 +65,10 @@
     {
       "id": "reno16f",
       "name": "OPPO Reno 16F",
-      "price": 150000,
+      "price": 149999,
       "observed_at": "2026-09-10T10:00:00Z",
-      "verified_price": 150000,
-      "note": "Owner-supplied price 2026-09-10 (V1-3). Stock not supplied — no stock claim. No owner-approved benefits supplied for this model — none invented. Negotiation floor UNRESOLVED (negotiation-rules.json).",
+      "verified_price": 149999,
+      "note": "Owner-supplied invoice 2026-09-13: PKR 149999 exactly. Stock not supplied — no stock claim. No owner-approved extra benefits supplied for this model — none invented. Autonomous floor lives in negotiation-rules.json (138600), never quoted as the opening price.",
       "tags": ["reno", "premium"]
     },
     {

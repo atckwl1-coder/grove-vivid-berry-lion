@@ -357,7 +357,7 @@
       "skill_name": "Walk-away / Floor Protection",
       "purpose": "State the floor as the final autonomous position when it is reached; route to the human path instead of inventing new authority.",
       "when_to_use": "Offer equals the owner floor AND customer still objects or asks below floor.",
-      "when_not_to_use": "Above the floor (that is controlled concession territory); floor unresolved (that is the staff path from the start).",
+      "when_not_to_use": "Above the floor (that is controlled concession territory); first response to a price objection (value-first / SK-03); opening offer; floor unresolved (that is the staff path from the start).",
       "prerequisites": [
         "authority_gated: structural engine gate (not learnable)"
       ],
@@ -367,7 +367,9 @@
       "prohibited_situations": [
         "below-floor offers",
         "claiming owner approval that does not exist",
-        "promising that the owner will approve a lower price"
+        "promising that the owner will approve a lower price",
+        "volunteering the floor as the opening or default price",
+        "disclosing dealer price / dealer cost / invoice-cost terminology"
       ],
       "performance": {
         "uses": 0,

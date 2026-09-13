@@ -8,24 +8,28 @@
 //    src/data/products.json          — prices (V1-2 / CAP-003 authority)
 //
 //  RULES (all deterministic; the LLM is not in the numeric path):
-//   • negotiation starts ONLY from the catalog (starting) price — and only
+//   • negotiation starts ONLY from the catalog (invoice) price — and only
 //     when that price is VERIFIED (V1-2 authority; stale/unknown → no number)
 //   • floor must be RESOLVED in the owner rules file (exact number).
 //     UNRESOLVED range → NO autonomous concession (never guess)
 //   • concession = ONE bounded step per customer turn:
 //     step = round(start × policy.concession_step_pct / 100)  [owner-tunable]
 //     next offer = max(floor, offer − step)  → NEVER below floor
-//     the floor is the FINAL autonomous position
+//     the floor is the FINAL autonomous LAST-RESORT position — never the
+//     opening offer, never volunteered early, never labelled "dealer price"
 //   • VALUE-FIRST: a concession requires (a value skill already used in this
 //     session) OR (the customer stated an explicit price to pay at).
 //     A bare "discount do" earns a value response, not a number.
 //   • ready-to-buy → CLOSE at the current (highest approved) offer —
-//     never volunteer a lower price
+//     never volunteer a lower price, never jump to the floor
 //   • below-floor request → bounded counter, floor line, then CAP-008
 //     human path (PRICE_EXCEPTION) — never a below-floor number, never a
 //     fabricated "owner approval"
 //   • re-open after walk: resume at the LAST authorized position (never
 //     above the starting price, never below the floor)
+//   • no 80/20 split is hard-coded. Persistent price-resistance (repeated
+//     explicit discount requests after value) is what walks the 1% ladder
+//     toward the floor. Most ready customers close at the invoice.
 //
 //  LEARNING (tactics ONLY, structural guarantee):
 //   • outcomes are captured from engine events (verification=

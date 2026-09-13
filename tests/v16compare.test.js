@@ -19,14 +19,18 @@ test('C1. parse reno16 vs reno16f', () => {
   assert.match(q.rightQuery, /reno\s*16f/i);
 });
 
-test('C2. compare uses catalog lines; 16F UNRESOLVED; no 186800 floor leak', () => {
+test('C2. compare uses catalog lines; no floor leak', () => {
   const r = compareProducts('reno16', 'reno16f');
   assert.equal(r.ok, true);
   assert.match(r.text, /Reno 16/);
   assert.match(r.text, /16F/);
-  assert.match(r.text, /UNRESOLVED/);
+  assert.equal(r.text.includes('UNRESOLVED'), false);
   assert.equal(r.text.includes('186800'), false);
   assert.equal(r.text.includes('186,800'), false);
+  assert.equal(r.text.includes('138600'), false);
+  assert.equal(r.text.includes('138,600'), false);
+  assert.match(r.text, /199,999/);
+  assert.match(r.text, /149,999/);
 });
 
 test('C3. unknown product fail-closed', () => {
