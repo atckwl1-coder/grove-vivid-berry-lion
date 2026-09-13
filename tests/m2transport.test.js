@@ -41,7 +41,7 @@ const {
   sessionNotActivatedSend,
   metaSideEffectsAllowed,
 } = await import('../src/sentinel/transport.js');
-const { createSessionAdapter, MAX_RECONNECT_ATTEMPTS, RECONNECT_MS } = await import('../src/sentinel/session/adapter.js');
+const { createSessionAdapter, MAX_RECONNECT_ATTEMPTS, RECONNECT_MS, MAX_QR } = await import('../src/sentinel/session/adapter.js');
 const { digitsFromJid, digitsToJid } = await import('../src/sentinel/session/jid.js');
 const { interactiveToText, mapCloudPayload } = await import('../src/sentinel/session/payload.js');
 const { ensureWaSessionDir, waSessionDir, markCorrupted } = await import('../src/sentinel/session/store.js');
@@ -450,6 +450,176 @@ test('M2A.21 reconnect budget exhaustion → DEGRADED; creds intact; owner start
   const sent = await adapter.sendFn({ to: '923001119999', type: 'text', text: { body: 'retry' } });
   assert.equal(sent.submitted, true);
   assert.equal(sent.delivered, false);
+});
+
+test('M2QR.1 NEEDS_QR + 408 retains the SAME pairing socket (no reconnect)', async () => {
+  let opens = 0;
+  let current;
+  const adapter = createSessionAdapter({
+    authDir: process.env.WA_SESSION_DIR,
+    reconnectMs: 10,
+    openSocket: async () => {
+      opens += 1;
+      current = mockSocket();
+      return current;
+    },
+  });
+  await adapter.start();
+  const first = current;
+  current.ev.emit('connection.update', { qr: 'PAIR-QR-1' });
+  assert.equal(adapter.getState().state, 'NEEDS_QR');
+  assert.equal(opens, 1);
+  current.ev.emit('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 408 } } } });
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(adapter.getState().state, 'NEEDS_QR');
+  assert.equal(opens, 1, '408 during NEEDS_QR must not open a replacement socket');
+  assert.equal(current, first);
+  assert.equal(adapter.takeQr({ role: 'OWNER' }), 'PAIR-QR-1');
+});
+
+test('M2QR.2 QR refresh stays on the same socket', async () => {
+  let opens = 0;
+  let current;
+  const adapter = createSessionAdapter({
+    authDir: process.env.WA_SESSION_DIR,
+    openSocket: async () => {
+      opens += 1;
+      current = mockSocket();
+      return current;
+    },
+  });
+  await adapter.start();
+  current.ev.emit('connection.update', { qr: 'PAIR-QR-A' });
+  current.ev.emit('connection.update', { qr: 'PAIR-QR-B' });
+  assert.equal(adapter.getState().state, 'NEEDS_QR');
+  assert.equal(adapter.getState().qrSeq, 2);
+  assert.equal(adapter.takeQr({ role: 'OWNER' }), 'PAIR-QR-B');
+  assert.equal(opens, 1);
+});
+
+test('M2QR.3 scan window remains valid after pairing 408 (same socket can CONNECTED)', async () => {
+  let opens = 0;
+  let current;
+  const adapter = createSessionAdapter({
+    authDir: process.env.WA_SESSION_DIR,
+    reconnectMs: 10,
+    openSocket: async () => {
+      opens += 1;
+      current = mockSocket();
+      return current;
+    },
+  });
+  await adapter.start();
+  current.ev.emit('connection.update', { qr: 'PAIR-QR-SCAN' });
+  current.ev.emit('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 408 } } } });
+  await new Promise((r) => setTimeout(r, 40));
+  assert.equal(adapter.getState().qrAvailable, true);
+  current.ev.emit('connection.update', { connection: 'open' });
+  assert.equal(adapter.getState().state, 'CONNECTED');
+  assert.equal(opens, 1);
+});
+
+test('M2QR.4 CONNECTED + 408 still reconnects (pairing hold does not leak)', async () => {
+  let opens = 0;
+  let current;
+  const adapter = createSessionAdapter({
+    authDir: process.env.WA_SESSION_DIR,
+    reconnectMs: 15,
+    openSocket: async () => {
+      opens += 1;
+      current = mockSocket();
+      return current;
+    },
+  });
+  await adapter.start();
+  current.ev.emit('connection.update', { connection: 'open' });
+  current.ev.emit('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 408 } } } });
+  assert.equal(adapter.getState().state, 'RECONNECTING');
+  await new Promise((r) => setTimeout(r, 50));
+  current.ev.emit('connection.update', { connection: 'open' });
+  assert.equal(adapter.getState().state, 'CONNECTED');
+  assert.ok(opens >= 2);
+});
+
+test('M2QR.5 non-QR 408 still obeys reconnect budget', async () => {
+  let opens = 0;
+  let current;
+  const adapter = createSessionAdapter({
+    authDir: process.env.WA_SESSION_DIR,
+    reconnectMs: 10,
+    maxReconnectAttempts: 2,
+    openSocket: async () => {
+      opens += 1;
+      current = mockSocket();
+      return current;
+    },
+  });
+  await adapter.start();
+  current.ev.emit('connection.update', { connection: 'open' });
+  current.ev.emit('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 408 } } } });
+  await new Promise((r) => setTimeout(r, 35));
+  current.ev.emit('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 408 } } } });
+  await new Promise((r) => setTimeout(r, 55));
+  current.ev.emit('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 408 } } } });
+  assert.equal(adapter.getState().state, 'DEGRADED');
+  const after = opens;
+  await new Promise((r) => setTimeout(r, 40));
+  assert.equal(opens, after);
+});
+
+test('M2QR.6 MAX_QR exhausts pairing without minting sockets', async () => {
+  assert.equal(MAX_QR, 24);
+  let opens = 0;
+  let current;
+  const adapter = createSessionAdapter({
+    authDir: process.env.WA_SESSION_DIR,
+    openSocket: async () => {
+      opens += 1;
+      current = mockSocket();
+      return current;
+    },
+  });
+  await adapter.start();
+  for (let i = 0; i < MAX_QR; i++) {
+    current.ev.emit('connection.update', { qr: `QR-${i}` });
+    assert.equal(adapter.getState().state, 'NEEDS_QR');
+  }
+  current.ev.emit('connection.update', { qr: 'QR-OVERFLOW' });
+  assert.equal(adapter.getState().state, 'AUTH_REQUIRED');
+  assert.equal(adapter.getState().qrAvailable, false);
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(opens, 1);
+});
+
+test('M2QR.7 owner retry after pairing hold may create a new socket; creds not deleted', async () => {
+  const dir = process.env.WA_SESSION_DIR;
+  fs.mkdirSync(dir, { recursive: true });
+  const credsPath = path.join(dir, 'creds.json');
+  fs.writeFileSync(credsPath, JSON.stringify({ registered: false, dummy: 'keep-me' }));
+  const before = fs.readFileSync(credsPath, 'utf8');
+
+  let opens = 0;
+  let current;
+  const adapter = createSessionAdapter({
+    authDir: dir,
+    reconnectMs: 10,
+    openSocket: async () => {
+      opens += 1;
+      current = mockSocket();
+      return current;
+    },
+  });
+  await adapter.start();
+  current.ev.emit('connection.update', { qr: 'PAIR-QR-HOLD' });
+  current.ev.emit('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 408 } } } });
+  await adapter.start();
+  assert.equal(opens, 1, 'start() during NEEDS_QR must not replace the companion');
+  adapter.resetAuth({ role: 'OWNER' });
+  await adapter.start();
+  current.ev.emit('connection.update', { qr: 'PAIR-QR-RETRY' });
+  assert.equal(adapter.getState().state, 'NEEDS_QR');
+  assert.equal(opens, 2, 'owner resetAuth+start may open a new pairing socket');
+  assert.equal(fs.readFileSync(credsPath, 'utf8'), before);
 });
 
 test('ISO. shipped owner files were not mutated', () => {

@@ -15,11 +15,22 @@ import { mapCloudPayload } from './payload.js';
 import { credsPresent, ensureWaSessionDir, isCorrupted } from './store.js';
 
 const SEND_TIMEOUT_MS = 15000;
-const MAX_QR = 24;
+export const MAX_QR = 24;
 /** Matches config.retry.baseMs default — no extra retry framework. */
 export const RECONNECT_MS = 1500;
 /** Matches config.retry.maxAttempts default. */
 export const MAX_RECONNECT_ATTEMPTS = 5;
+
+function closeStatus(lastDisconnect) {
+  return lastDisconnect?.error?.output?.statusCode
+    ?? lastDisconnect?.statusCode
+    ?? lastDisconnect
+    ?? null;
+}
+
+function isPairingTimeout(status) {
+  return Number(status) === 408;
+}
 
 function withTimeout(promise, ms, code = 'SESSION_SEND_TIMEOUT') {
   return new Promise((resolve, reject) => {
@@ -127,6 +138,7 @@ export function createSessionAdapter(opts = {}) {
     qrSeq = 0;
     forgetQr();
     clearReconnect();
+    sock = null; // drop in-memory socket only — does not delete auth files
     machine.set('STOPPED', 'owner reset auth lock');
     return publicState();
   }
@@ -172,23 +184,28 @@ export function createSessionAdapter(opts = {}) {
       }
 
       if (connection === 'close') {
-        const status = lastDisconnect?.error?.output?.statusCode
-          ?? lastDisconnect?.statusCode
-          ?? lastDisconnect
-          ?? null;
-        sock = null;
-        if (authLocked || machine.state === 'AUTH_REQUIRED') {
+        const status = closeStatus(lastDisconnect);
+        /* Pairing window: 408 timedOut/connectionLost must NOT mint a new
+         * companion. QR may still refresh on THIS socket. Owner retry
+         * (resetAuth + start) is the only way to replace it. */
+        if (machine.state === 'NEEDS_QR' && isPairingTimeout(status)) {
           clearReconnect();
-          forgetQr();
-        } else if (status === 401) {
-          lockAuth('loggedOut/401 — no auto QR loop');
-        } else if (stopped) {
-          machine.set('STOPPED', 'closed after stop');
-        } else if (machine.state === 'DEGRADED' || machine.state === 'DISABLED' || machine.state === 'CORRUPTED') {
-          /* stay — no reconnect */
+          auditFn('SESSION_PAIRING_HOLD', { status: 408, seq: qrSeq });
         } else {
-          machine.set('RECONNECTING', 'socket close status=' + String(status));
-          scheduleReconnect();
+          sock = null;
+          if (authLocked || machine.state === 'AUTH_REQUIRED') {
+            clearReconnect();
+            forgetQr();
+          } else if (status === 401) {
+            lockAuth('loggedOut/401 — no auto QR loop');
+          } else if (stopped) {
+            machine.set('STOPPED', 'closed after stop');
+          } else if (machine.state === 'DEGRADED' || machine.state === 'DISABLED' || machine.state === 'CORRUPTED') {
+            /* stay — no reconnect */
+          } else {
+            machine.set('RECONNECTING', 'socket close status=' + String(status));
+            scheduleReconnect();
+          }
         }
       }
 
@@ -206,7 +223,7 @@ export function createSessionAdapter(opts = {}) {
 
   function scheduleReconnect() {
     clearReconnect();
-    if (stopped || authLocked || terminalAuth(machine.state) || machine.state === 'DEGRADED') return;
+    if (stopped || authLocked || terminalAuth(machine.state) || machine.state === 'DEGRADED' || machine.state === 'NEEDS_QR') return;
     reconnectAttempts += 1;
     if (reconnectAttempts > maxReconnectAttempts) {
       machine.set('DEGRADED', 'reconnect budget exhausted');
@@ -234,6 +251,10 @@ export function createSessionAdapter(opts = {}) {
     }
     if (authLocked || machine.state === 'AUTH_REQUIRED') {
       machine.set('AUTH_REQUIRED', 'auth locked until owner reset');
+      return publicState();
+    }
+    /* Do not replace an active pairing companion. Owner resetAuth() first. */
+    if (machine.state === 'NEEDS_QR' && !startOpts.ownerRetry) {
       return publicState();
     }
     stopped = false;
