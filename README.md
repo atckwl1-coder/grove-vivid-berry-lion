@@ -15,7 +15,7 @@ The LLM is **not** price, policy, or security authority. DEBT-07: model-generate
 - Not a marketing engine (governor exists but is unwired; firewall denies `MARKETING.SEND`)
 - Not STT/vision (stubs; photo/voice copy is honest)
 - Not a payment gateway (a customer saying “I'll take this” is stated intent; follow-up requires staff-confirmed **paid** via the CAP-008 inbox “Mark as PAID” action — not a PSP)
-- Not QR/session WhatsApp (not implemented; D-010 recommends staying on Meta Cloud API)
+- Not QR/session WhatsApp as a proven live product (M2 adapter is implemented/tested; live operation is **not** proven; DEMO remains default)
 
 ## Layout
 
@@ -54,7 +54,7 @@ Owner catalog ritual: `node scripts/verify-catalog.mjs --verify` (24h TTL; stale
 ## Settled constraints
 
 - Reno 16 autonomous floor = **Rs. 186,800** exactly (invoice **Rs. 199,999**)
-- Reno 16F autonomous floor = **Rs. 138,600** exactly (invoice **Rs. 149,999**)
+- Reno 16F autonomous floor = **Rs. 138,600** exactly in the current owner file (invoice **Rs. 149,999**). V1-5.1 freeze recorded 16F UNRESOLVED; do not revert without owner instruction.
 - Floors are last-resort. Do not volunteer them. Never quote below.
 - Kill switch and Action Firewall architecture stay
 - CAP-008 human fallback stays
@@ -63,4 +63,4 @@ Owner catalog ritual: `node scripts/verify-catalog.mjs --verify` (24h TTL; stale
 
 ## Status
 
-See `STATE.md`, `PROGRESS.md`, and `HANDOFF.md`. Current `main` is `6b507e9` (332/332 DEMO). V1-6 plus post-freeze staff product (confirm-paid without conversation, lead queue, staff-recorded stated sale, unpaid uniqueness) sit on the frozen V1-5.1 safety gate. Historical tag `sentinel-v1.6-pilot-freeze` is **not** current HEAD. This is **not** a live Meta smoke test and **not** a QR transport. Catalog prices are **STALE** until the owner re-verifies. D-010 (`D010_TRANSPORT_PREFLIGHT.md`) is a decision record; `B2_LIVE_SMOKE_CHECKLIST.md` is operator prep. **B-2 is BLOCKED / NOT RUN.** Nothing is `VERIFIED_PRODUCTION`. `SENT`/`SUBMITTED` ≠ `DELIVERED`.
+See `SENTINEL_CONTINUATION_STATE.md`, `docs/evidence/M2_FREEZE.md`, `STATE.md`, `PROGRESS.md`, and `HANDOFF.md`. **M2 = COMPLETE/FROZEN** at `399afde` (432/432 ×2). **V1-5.1 = COMPLETE/FROZEN.** Overall = **DEMO/PILOT**. This is **not** a live Meta smoke test and **not** proven live session delivery. Catalog prices are **STALE** until the owner re-verifies. **B-2 is BLOCKED / NOT RUN.** Nothing is `VERIFIED_PRODUCTION`. `SENT`/`SUBMITTED` ≠ `DELIVERED`.
