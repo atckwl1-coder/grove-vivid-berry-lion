@@ -58,7 +58,7 @@ function openCaughtUp() {
   inbound.noteConnectionUpdate({ receivedPendingNotifications: true });
 }
 
-test('SI0. default is NOT activated; index.js does not wire ingest', async () => {
+test('SI0. default is NOT activated; ingest is not a second brain', async () => {
   inbound.resetSessionInboundState();
   openPending();
   const r = await inbound.ingestSessionUpsert(
@@ -67,8 +67,9 @@ test('SI0. default is NOT activated; index.js does not wire ingest', async () =>
   );
   assert.equal(r.results[0].reason, 'NOT_ACTIVATED');
   const idx = fs.readFileSync(path.join(REPO, 'src/index.js'), 'utf8');
-  assert.equal(idx.includes('sessionInbound'), false);
-  assert.equal(idx.includes('ingestSessionUpsert'), false);
+  assert.equal(idx.includes('makeWASocket'), false);
+  assert.match(idx, /handleIncomingMessage/);
+  assert.match(idx, /sessionInboundHandlers/);
 });
 
 test('SI1. notify while connected+catchup-pending → durable claim + existing deliver shape', async () => {

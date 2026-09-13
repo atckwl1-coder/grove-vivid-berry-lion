@@ -32,6 +32,7 @@ export function createSessionAdapter(opts = {}) {
   const authDir = opts.authDir;
   const openSocket = opts.openSocket;
   const onUpsert = opts.onUpsert;
+  const onConnection = opts.onConnection;
   const auditFn = opts.auditFn || audit;
   const reconnectMs = Number.isFinite(opts.reconnectMs) ? opts.reconnectMs : RECONNECT_MS;
 
@@ -99,6 +100,7 @@ export function createSessionAdapter(opts = {}) {
         if (qrSeq > MAX_QR) {
           forgetQr();
           machine.set('AUTH_REQUIRED', 'QR pairing window exhausted');
+          if (typeof onConnection === 'function') onConnection({ ...update, connection: 'close', statusCode: 401 });
           return;
         }
         qrPayload = String(qr);
@@ -118,15 +120,14 @@ export function createSessionAdapter(opts = {}) {
         if (status === 401) {
           clearReconnect();
           machine.set('AUTH_REQUIRED', 'loggedOut/401 — no auto QR loop');
-          return;
-        }
-        if (stopped) {
+        } else if (stopped) {
           machine.set('STOPPED', 'closed after stop');
-          return;
+        } else {
+          machine.set('RECONNECTING', 'socket close status=' + String(status));
+          scheduleReconnect();
         }
-        machine.set('RECONNECTING', 'socket close status=' + String(status));
-        scheduleReconnect();
       }
+      if (typeof onConnection === 'function') onConnection(update);
     });
 
     ev.on('messages.upsert', (event) => {

@@ -11,6 +11,8 @@ import { createOutbox } from './sentinel/outbox.js';
 import { initOutbox, deliverToMeta, demoDeliver } from './services/whatsapp.js';
 import { resolveTransport, requestedTransportId } from './sentinel/transport.js';
 import { createSessionAdapter } from './sentinel/session/adapter.js';
+import { sessionInboundHandlers } from './sentinel/session/bindInbound.js';
+import { handleIncomingMessage } from './services/brain.js';
 import { messagingWindowGuard } from './sentinel/gates.js';
 import { startScheduler } from './workers/scheduler.js';
 import { log } from './utils/logger.js';
@@ -50,7 +52,17 @@ try {
 }
 
 // Durable outbound dispatcher — inject provider + policy guard + kill gate
-const sessionAdapter = createSessionAdapter({ authDir: config.waSessionDir, auditFn: audit });
+const sessionSelected = requestedTransportId() === 'session';
+const inbound = sessionInboundHandlers({
+  deliver: handleIncomingMessage,
+  activated: sessionSelected,
+});
+const sessionAdapter = createSessionAdapter({
+  authDir: config.waSessionDir,
+  auditFn: audit,
+  onConnection: inbound.onConnection,
+  onUpsert: inbound.onUpsert,
+});
 const transport = resolveTransport({
   live: isLive(),
   deliverToMeta,
@@ -77,6 +89,7 @@ outbox.recover(); // §17: crash-interrupted jobs — honestly re-queued as UNCE
 outbox.start();
 
 if (transport.id === 'session') {
+  inbound.onStart();
   sessionAdapter.start().catch((err) => {
     log.error('session adapter start failed:', err?.message || err);
   });
