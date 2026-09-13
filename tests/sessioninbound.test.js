@@ -295,6 +295,111 @@ test('SI18. unknown upsert type is not a customer turn', async () => {
   assert.equal(delivered.length, 0);
 });
 
+test('SI19. missing deliver rejects BEFORE claim; replay remains possible', async () => {
+  inbound.resetSessionInboundState();
+  openPending();
+  const r = await inbound.ingestSessionUpsert(
+    { type: 'notify', messages: [msg({ id: '3EB0NODLV', text: 'x' })] },
+    { activated: true },
+  );
+  assert.equal(r.results[0].reason, 'NO_DELIVER');
+  assert.equal(r.results[0].claimed, false);
+  const marker = path.join(process.env.IDEM_DIR, 'sess_3EB0NODLV');
+  assert.equal(fs.existsSync(marker), false, 'NO_DELIVER must not poison the durable store');
+  const replay = await ingest({ type: 'notify', messages: [msg({ id: '3EB0NODLV', text: 'x' })] });
+  assert.equal(replay.results[0].accepted, true, 'same id is still deliverable after NO_DELIVER');
+  assert.equal(fs.existsSync(marker), true);
+});
+
+test('SI20. append before RPN (catch-up pending) is accepted', async () => {
+  inbound.resetSessionInboundState();
+  openPending();
+  assert.equal(inbound.isCaughtUp(), false);
+  const { results } = await ingest({ type: 'append', messages: [msg({ id: '3EB0PRE-RPN', text: 'outage' })] });
+  assert.equal(results[0].accepted, true);
+  assert.equal(inbound.getSessionInboundState().catchup, 'PENDING');
+});
+
+test('SI21. append during RPN transition is not lost; CAUGHT_UP waits for drain', async () => {
+  inbound.resetSessionInboundState();
+  openPending();
+  const delivered = [];
+  let release;
+  const blocker = new Promise((resolve) => { release = resolve; });
+  const slow = ingest(
+    { type: 'append', messages: [msg({ id: '3EB0SLOW', text: 'in-flight' })] },
+    { delivered, deliver: async (n) => { await blocker; delivered.push(n); } },
+  );
+  const midState = inbound.noteConnectionUpdate({ receivedPendingNotifications: true });
+  assert.equal(midState.catchup, 'DRAINING');
+  assert.equal(inbound.isCaughtUp(), false, 'RPN does not confirm CAUGHT_UP while ingest is in-flight');
+  const during = ingest({ type: 'append', messages: [msg({ id: '3EB0DRAIN', text: 'during drain' })] }, { delivered });
+  release();
+  const a = await slow;
+  const b = await during;
+  await inbound.flushSessionInbound();
+  assert.equal(a.results[0].accepted, true);
+  assert.equal(b.results[0].accepted, true);
+  assert.equal(delivered.map((d) => d.id).sort().join(','), '3EB0DRAIN,3EB0SLOW');
+  assert.equal(inbound.isCaughtUp(), true, 'CAUGHT_UP confirmed only after drain');
+});
+
+test('SI22. append after confirmed CAUGHT_UP is SKIP_STALE_APPEND, not a silent drop', async () => {
+  inbound.resetSessionInboundState();
+  openCaughtUp();
+  const { delivered, results } = await ingest({ type: 'append', messages: [msg({ id: '3EB0AFTER', text: 'history' })] });
+  assert.equal(results[0].accepted, false);
+  assert.equal(results[0].reason, 'SKIP_STALE_APPEND');
+  assert.equal(delivered.length, 0);
+  assert.equal(fs.existsSync(path.join(process.env.IDEM_DIR, 'sess_3EB0AFTER')), false);
+});
+
+test('SI23. same event in notify + append is one effect either order', async () => {
+  inbound.resetSessionInboundState();
+  openPending();
+  const d1 = [];
+  await ingest({ type: 'notify', messages: [msg({ id: '3EB0NA', text: 'n' })] }, { delivered: d1 });
+  const later = await ingest({ type: 'append', messages: [msg({ id: '3EB0NA', text: 'n' })] }, { delivered: d1 });
+  assert.equal(d1.length, 1);
+  assert.equal(later.results[0].reason, 'DUPLICATE');
+
+  inbound.resetSessionInboundState();
+  openPending();
+  const d2 = [];
+  await ingest({ type: 'append', messages: [msg({ id: '3EB0AN', text: 'a' })] }, { delivered: d2 });
+  const later2 = await ingest({ type: 'notify', messages: [msg({ id: '3EB0AN', text: 'a' })] }, { delivered: d2 });
+  assert.equal(d2.length, 1);
+  assert.equal(later2.results[0].reason, 'DUPLICATE');
+});
+
+test('SI24. reconnect then append: held during close, accepted after open pending', async () => {
+  inbound.resetSessionInboundState();
+  openCaughtUp();
+  inbound.noteConnectionUpdate({ connection: 'close', statusCode: 408 });
+  const held = await ingest({ type: 'append', messages: [msg({ id: '3EB0RC', text: 'after net' })] });
+  assert.equal(held.results[0].reason, 'SOCKET_HOLD');
+  inbound.noteConnectionUpdate({ connection: 'open' });
+  assert.equal(inbound.isCaughtUp(), false);
+  const after = await ingest({ type: 'append', messages: [msg({ id: '3EB0RC', text: 'after net' })] });
+  assert.equal(after.results[0].accepted, true);
+});
+
+test('SI25. state reset then catch-up: PENDING until RPN, then CAUGHT_UP', async () => {
+  inbound.resetSessionInboundState();
+  openCaughtUp();
+  inbound.resetSessionInboundState();
+  assert.equal(inbound.getSessionInboundState().catchup, 'PENDING');
+  assert.equal(inbound.isCaughtUp(), false);
+  openPending();
+  const { results } = await ingest({ type: 'append', messages: [msg({ id: '3EB0RST', text: 'after reset' })] });
+  assert.equal(results[0].accepted, true);
+  inbound.noteConnectionUpdate({ receivedPendingNotifications: true });
+  await inbound.flushSessionInbound();
+  assert.equal(inbound.isCaughtUp(), true);
+  const stale = await ingest({ type: 'append', messages: [msg({ id: '3EB0RST2', text: 'too late' })] });
+  assert.equal(stale.results[0].reason, 'SKIP_STALE_APPEND');
+});
+
 test('ISO. shipped owner files unchanged', () => {
   assert.deepEqual(shippedOwnerHashes(), hashesBefore);
 });

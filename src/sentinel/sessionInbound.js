@@ -6,17 +6,24 @@
  *
  * Path (when a future cycle activates ingest):
  *   session upsert {messages, type: notify|append}
+ *     → require deliver callback (else NO_DELIVER, no claim)
  *     → normalize to Cloud-shaped {from,id,type,text}
  *     → claimEvent('sess:' + provider key.id)   // existing durable store
  *     → deliver(normalized)                     // existing handleIncomingMessage
  *
  * CONNECTED (socket open) is not CAUGHT_UP. CAUGHT_UP is only after
- * receivedPendingNotifications=true (library offline flush complete).
+ * receivedPendingNotifications=true AND in-flight ingest has drained.
  *
- * append during catch-up is outage mail and MUST be considered.
- * append after CAUGHT_UP is history/backfill and is not a new customer turn.
- * That split is library-typed (notify vs append + pending-notifications),
- * not an invented age in seconds.
+ * Catch-up / RPN ordering (activation contract, no wall-clock):
+ *   1. Call ingestSessionUpsert for each upsert (may overlap).
+ *   2. Call noteConnectionUpdate for connection / RPN events.
+ *   3. RPN while ingest is in-flight → DRAINING; append still accepted.
+ *   4. CAUGHT_UP is confirmed only when active ingest count hits 0.
+ *   5. After CAUGHT_UP, append is SKIP_STALE_APPEND (explicit, not a race).
+ *   6. Optional: await flushSessionInbound() before treating catch-up complete.
+ *
+ * append during catch-up (PENDING / DRAINING) is outage mail and MUST be considered.
+ * append after confirmed CAUGHT_UP is history/backfill and is not a new customer turn.
  *
  * Recovery machines (not equivalent):
  *   A customer device offline — sender-side; Sentinel does nothing.
@@ -45,8 +52,16 @@ const EMPTY_STATE = () => ({
 });
 
 let state = EMPTY_STATE();
+let activeIngests = 0;
+let catchupDrain = false;
+let idleWaiters = [];
 
 export function resetSessionInboundState() {
+  activeIngests = 0;
+  catchupDrain = false;
+  const waiters = idleWaiters;
+  idleWaiters = [];
+  for (const resolve of waiters) resolve(snapshot());
   state = EMPTY_STATE();
   return snapshot();
 }
@@ -123,7 +138,53 @@ export function classifyClose(statusCode) {
   return 'C';
 }
 
+function clearCatchupDrain() {
+  catchupDrain = false;
+}
+
+function settleIdle() {
+  if (activeIngests !== 0) return;
+  const waiters = idleWaiters;
+  idleWaiters = [];
+  for (const resolve of waiters) resolve(snapshot());
+}
+
+function markCaughtUp() {
+  catchupDrain = false;
+  state.catchup = 'CAUGHT_UP';
+  state.receivedPendingNotifications = true;
+  state.inbound = 'live';
+  audit('SESSION_CATCHUP', { catchup: 'CAUGHT_UP' });
+}
+
+/** RPN observed. CAUGHT_UP only after in-flight ingest drains. */
+function requestCaughtUp() {
+  if (state.socket !== 'CONNECTED' || state.recovery === 'D') return;
+  if (activeIngests > 0) {
+    catchupDrain = true;
+    state.catchup = 'DRAINING';
+    state.receivedPendingNotifications = true;
+    state.inbound = 'catchup';
+    audit('SESSION_CATCHUP', { catchup: 'DRAINING', activeIngests });
+    return;
+  }
+  markCaughtUp();
+}
+
+function finishIngest() {
+  if (activeIngests > 0) activeIngests -= 1;
+  if (catchupDrain) requestCaughtUp();
+  settleIdle();
+}
+
+/** Future wire: wait until in-flight ingest has drained (and CAUGHT_UP can confirm). */
+export function flushSessionInbound() {
+  if (activeIngests === 0) return Promise.resolve(snapshot());
+  return new Promise((resolve) => { idleWaiters.push(resolve); });
+}
+
 export function noteProcessStop() {
+  clearCatchupDrain();
   state.socket = 'STOPPED';
   state.catchup = 'PENDING';
   state.receivedPendingNotifications = false;
@@ -136,6 +197,7 @@ export function noteProcessStop() {
 
 export function noteProcessStart() {
   // Boot after B: we are not CONNECTED and not CAUGHT_UP until the library says so.
+  clearCatchupDrain();
   state.socket = 'CONNECTING';
   state.catchup = 'PENDING';
   state.receivedPendingNotifications = false;
@@ -155,6 +217,7 @@ export function noteConnectionUpdate(update = {}) {
     ?? null;
 
   if (connection === 'connecting') {
+    clearCatchupDrain();
     state.socket = 'CONNECTING';
     state.catchup = 'PENDING';
     state.receivedPendingNotifications = false;
@@ -169,8 +232,9 @@ export function noteConnectionUpdate(update = {}) {
       /* stay D until owner re-pair — open after 401 is not trusted here */
     } else {
       state.recovery = 'C'; // process is alive
-      if (rpn === true) markCaughtUp();
+      if (rpn === true) requestCaughtUp();
       else {
+        clearCatchupDrain();
         state.catchup = 'PENDING';
         state.receivedPendingNotifications = false;
         state.inbound = 'catchup';
@@ -179,6 +243,7 @@ export function noteConnectionUpdate(update = {}) {
   }
 
   if (connection === 'close') {
+    clearCatchupDrain();
     state.lastDisconnect = status;
     const kind = classifyClose(status);
     if (kind === 'D') {
@@ -199,7 +264,7 @@ export function noteConnectionUpdate(update = {}) {
   }
 
   if (rpn === true && state.socket === 'CONNECTED' && state.recovery !== 'D') {
-    markCaughtUp();
+    requestCaughtUp();
   }
 
   audit('SESSION_SOCKET', {
@@ -210,13 +275,6 @@ export function noteConnectionUpdate(update = {}) {
     lastDisconnect: state.lastDisconnect,
   });
   return snapshot();
-}
-
-function markCaughtUp() {
-  state.catchup = 'CAUGHT_UP';
-  state.receivedPendingNotifications = true;
-  state.inbound = 'live';
-  audit('SESSION_CATCHUP', { catchup: 'CAUGHT_UP' });
 }
 
 export function digitsFromJid(jid) {
@@ -305,10 +363,15 @@ function activated(ctx) {
  * Ingest one library upsert. Default: NOT activated (no customer-inbox).
  * Pass { activated: true, deliver } from tests / a future authorized wire.
  * deliver MUST be the existing incoming handler (handleIncomingMessage).
+ * Missing deliver rejects BEFORE claim (replay remains possible).
  */
 export async function ingestSessionUpsert(event = {}, ctx = {}) {
   if (!activated(ctx)) {
     return { accepted: 0, results: [{ accepted: false, reason: 'NOT_ACTIVATED' }], state: snapshot() };
+  }
+  if (typeof ctx.deliver !== 'function') {
+    audit('SESSION_INBOUND_SKIP', { reason: 'NO_DELIVER' });
+    return { accepted: 0, results: [{ accepted: false, reason: 'NO_DELIVER', claimed: false }], state: snapshot() };
   }
   if (state.recovery === 'D' || state.socket === 'AUTH_REQUIRED') {
     return { accepted: 0, results: [{ accepted: false, reason: 'AUTH_REQUIRED' }], state: snapshot() };
@@ -318,60 +381,57 @@ export async function ingestSessionUpsert(event = {}, ctx = {}) {
     return { accepted: 0, results: [{ accepted: false, reason: 'SOCKET_HOLD', socket: state.socket }], state: snapshot() };
   }
 
-  const type = event.type;
-  const typeGate = shouldAcceptType(type);
-  const messages = Array.isArray(event.messages) ? event.messages : [];
-  const results = [];
-  let accepted = 0;
+  activeIngests += 1;
+  try {
+    const type = event.type;
+    const messages = Array.isArray(event.messages) ? event.messages : [];
+    const results = [];
+    let accepted = 0;
 
-  for (const msg of messages) {
-    const n = normalizeSessionMessage(msg);
-    if (!n.ok) {
-      if (n.reason === 'SKIP_HISTORY' && n.id) {
-        // Burn history ids so they can never become a customer turn later.
-        claimEvent(sessionClaimId(n.id));
-      }
-      audit('SESSION_INBOUND_SKIP', { reason: n.reason, id: n.id || null, upsertType: type });
-      results.push({ accepted: false, reason: n.reason, id: n.id || null });
-      continue;
-    }
-    if (!typeGate.ok) {
-      audit('SESSION_INBOUND_SKIP', { reason: typeGate.reason, id: n.id, upsertType: type });
-      results.push({ accepted: false, reason: typeGate.reason, id: n.id, upsertType: type });
-      continue;
-    }
-    if (!upsertTypeOk(type)) {
-      results.push({ accepted: false, reason: 'SKIP_UNKNOWN_TYPE', id: n.id });
-      continue;
-    }
-
-    const claimId = sessionClaimId(n.id);
-    const fresh = claimEvent(claimId);
-    if (!fresh) {
-      audit('EVENT_DUPLICATE', { id: n.id, path: 'session', upsertType: type });
-      results.push({ accepted: false, duplicate: true, reason: 'DUPLICATE', id: n.id, upsertType: type });
-      continue;
-    }
-
-    audit('EVENT_RECEIVED', { id: n.id, from: n.normalized.from, type: n.normalized.type, path: 'session', upsertType: type, catchup: state.catchup });
-    try {
-      if (typeof ctx.deliver !== 'function') {
-        // Fail closed AFTER claim would poison. Only reachable if a caller
-        // activates ingest without a deliver — treat as EVENT_FAILED and
-        // do not invent a second processor.
-        audit('EVENT_FAILED', { id: n.id, error: 'NO_DELIVER' });
-        results.push({ accepted: false, reason: 'NO_DELIVER', id: n.id, claimed: true });
+    for (const msg of messages) {
+      const n = normalizeSessionMessage(msg);
+      if (!n.ok) {
+        if (n.reason === 'SKIP_HISTORY' && n.id) {
+          // Burn history ids so they can never become a customer turn later.
+          claimEvent(sessionClaimId(n.id));
+        }
+        audit('SESSION_INBOUND_SKIP', { reason: n.reason, id: n.id || null, upsertType: type });
+        results.push({ accepted: false, reason: n.reason, id: n.id || null });
         continue;
       }
-      await ctx.deliver(n.normalized, ctx.profileName || '');
-      audit('EVENT_PROCESSED', { id: n.id, path: 'session' });
-      accepted += 1;
-      results.push({ accepted: true, reason: 'CLAIMED', id: n.id, upsertType: type, normalized: n.normalized });
-    } catch (err) {
-      audit('EVENT_FAILED', { id: n.id, error: String(err?.message || err) });
-      results.push({ accepted: false, reason: 'DELIVER_FAILED', id: n.id, claimed: true, error: String(err?.message || err) });
-    }
-  }
+      const typeGate = shouldAcceptType(type);
+      if (!typeGate.ok) {
+        audit('SESSION_INBOUND_SKIP', { reason: typeGate.reason, id: n.id, upsertType: type });
+        results.push({ accepted: false, reason: typeGate.reason, id: n.id, upsertType: type });
+        continue;
+      }
+      if (!upsertTypeOk(type)) {
+        results.push({ accepted: false, reason: 'SKIP_UNKNOWN_TYPE', id: n.id });
+        continue;
+      }
 
-  return { accepted, results, state: snapshot() };
+      const claimId = sessionClaimId(n.id);
+      const fresh = claimEvent(claimId);
+      if (!fresh) {
+        audit('EVENT_DUPLICATE', { id: n.id, path: 'session', upsertType: type });
+        results.push({ accepted: false, duplicate: true, reason: 'DUPLICATE', id: n.id, upsertType: type });
+        continue;
+      }
+
+      audit('EVENT_RECEIVED', { id: n.id, from: n.normalized.from, type: n.normalized.type, path: 'session', upsertType: type, catchup: state.catchup });
+      try {
+        await ctx.deliver(n.normalized, ctx.profileName || '');
+        audit('EVENT_PROCESSED', { id: n.id, path: 'session' });
+        accepted += 1;
+        results.push({ accepted: true, reason: 'CLAIMED', id: n.id, upsertType: type, normalized: n.normalized });
+      } catch (err) {
+        audit('EVENT_FAILED', { id: n.id, error: String(err?.message || err) });
+        results.push({ accepted: false, reason: 'DELIVER_FAILED', id: n.id, claimed: true, error: String(err?.message || err) });
+      }
+    }
+
+    return { accepted, results, state: snapshot() };
+  } finally {
+    finishIngest();
+  }
 }
