@@ -1,8 +1,8 @@
 # STATE — truthful snapshot (2026-09-13, post-freeze product cycle)
 
-- **HEAD:** `main` `6b507e9159f9e95e6be994242373899782904cbc` (`fix: prevent duplicate unpaid sales per phone and SKU`). Tracks origin. Working tree clean at last docs pass.
+- **HEAD:** `feature/reno16-pricing-floors` (unmerged). Approved `main` remains `9e0f61a7d544d8c752874ad072c189b5685a82d0`. Pricing commit on this branch: `76b5ba7e0228a53083452e7fa7932f2373c54862`. Not on `main`. Working tree clean after this docs pass.
 - **Historical freeze:** tag `sentinel-v1.6-pilot-freeze` → `f92a3f8d6838384f5ab6feb67598c35d8075a8a1`. Historical V1-6 safety-gate pin only. Current `main` is **ahead** of that tag. Do not treat the freeze as current HEAD.
-- **Suite:** `npm test` sequential per-file runner. **VERIFIED 2026-09-13 after merge of unpaid uniqueness:** 23 files, **332/332 pass** (fail=0). Do not cite this number after the next code change without re-running.
+- **Suite:** `npm test` sequential per-file runner. **VERIFIED 2026-09-13 on `feature/reno16-pricing-floors`:** 24 files, **338/338 pass** (fail=0). Not merged. Historical: 332/332 at `6b507e9` (unpaid uniqueness, then on `main`). Do not cite 338/338 after the next code change without re-running.
 - **Live server:** DEMO unless Cloud API tokens are set. Real WhatsApp is **IMPLEMENTED BUT UNPROVEN**. **B-2 is BLOCKED / NOT RUN** — no live Meta credentials or authorized test handset/WABA in this environment. `b2Preflight()` and `B2_LIVE_SMOKE_CHECKLIST.md` are operator prep, **not** live evidence. Provider `SENT`/`SUBMITTED` ≠ customer `DELIVERED`. Sentinel never claims `DELIVERED`.
 - **Catalog:** shipped `products.json` `observed_at` is 2026-09-05 / 2026-09-10. Versus wall clock **STALE** until the owner re-runs `node scripts/verify-catalog.mjs --verify`. STALE quotes are dated “aakhri verified price”, never “aaj ki price”.
 - **Kill switch / firewall / CAP-008 FSM / outbox / numberFirewall:** unchanged architecture since the freeze. Kill still dominates autonomous execution. Human takeover still suppresses AI. P2 and `outbox.enqueue` still do not inspect amounts. Staff `confirm-paid` is **not** an outbound send. LLM/router/qualification/profile/compare/care/ops **cannot** call `confirmPaidSale` or `recordStaffStatedSale`.
@@ -16,5 +16,5 @@
 - **Typing indicator:** code-verified on the Meta Cloud API path in DEMO. **Not live-proven.**
 - **Transport (D-010):** **CURRENT TRANSPORT = Meta Cloud API. QR / SESSION = NOT IMPLEMENTED.**
 - **Do-not-touch without authorization:** CAP-008/055/P2 foundations, CAP-007 marketing, floors, QR/session transport, SQLite, STT/vision, payments, PTA/warranty APIs.
-- **Open debts (still):** DEBT-09 governor unwired, DEBT-17/18/19/20, **B-2 live Meta (BLOCKED)**, B-7 Reno 16F floor, remaining cross-SKU collisions, no POS, catalog owner re-verify, inbox must not be internet-exposed until DEBT-19.
+- **Open debts (still):** DEBT-09 governor unwired, DEBT-17/18/19/20, **B-2 live Meta (BLOCKED)**, remaining cross-SKU collisions, no POS, catalog owner re-verify, inbox must not be internet-exposed until DEBT-19. **B-7 CLOSED** (Reno 16F floor 138600 RESOLVED, 2026-09-13).
 - **Production status:** DEMO/PILOT. Safer for a **small staffed sample in DEMO**. Nothing here is `VERIFIED_PRODUCTION`.
