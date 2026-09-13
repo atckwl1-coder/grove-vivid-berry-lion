@@ -16,6 +16,7 @@ import { profileOf } from '../services/profile.js';
 import { ownerSnapshot } from '../services/ops.js';
 import { opsPage } from '../inbox/opsViews.js';
 import { b2Preflight } from '../services/b2preflight.js';
+import { getSessionRuntime, publicSessionStatus } from '../sentinel/session/runtime.js';
 
 export const inboxRouter = express.Router();
 
@@ -144,6 +145,44 @@ inboxRouter.get('/inbox/c/:phone', (req, res) => {
 });
 const authCsrf = (req) => auth.authenticate(req)?.csrf || '';
 
+// ── OWNER session status / QR (payload never audited) ──
+inboxRouter.get('/inbox/session', (req, res) => {
+  const actor = requireAuth(req, res); if (!actor) return;
+  if (!requireOwner(actor, req, res)) return;
+  const status = publicSessionStatus();
+  if (wantsJson(req)) return res.json({ ok: true, session: status });
+  const qr = status.qrAvailable
+    ? `<p>QR available (seq ${status.qrSeq}). Scan from this authenticated page only.</p><img alt="pairing QR" src="/inbox/session/qr">`
+    : `<p>No QR waiting. State: ${status.state}</p>`;
+  return res.type('html').send(`<!doctype html><meta charset=utf-8><title>Session</title>
+    <h2>WhatsApp session</h2>
+    <p>transport=${status.transport} state=${status.state} creds=${status.creds}</p>
+    ${qr}
+    <p><a href="/inbox">back</a></p>`);
+});
+
+inboxRouter.get('/inbox/session/qr', async (req, res) => {
+  const actor = requireAuth(req, res); if (!actor) return;
+  if (!requireOwner(actor, req, res)) return;
+  const adapter = getSessionRuntime().adapter;
+  if (!adapter || typeof adapter.takeQr !== 'function') return res.status(404).send('NO_QR');
+  let payload;
+  try {
+    payload = adapter.takeQr(actor);
+  } catch (e) {
+    return res.status(e.code === 'OWNER_ONLY' ? 403 : 404).send(e.code || 'NO_QR');
+  }
+  if (!payload) return res.status(404).send('NO_QR');
+  try {
+    const QR = await import('qrcode');
+    const png = await QR.toBuffer(payload, { type: 'png', margin: 2, width: 320 });
+    res.setHeader('Cache-Control', 'no-store');
+    return res.type('png').send(png);
+  } catch {
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(503).type('text').send('QR_RENDER_UNAVAILABLE');
+  }
+});
 
 // ── OWNER OPS (deterministic snapshot; not a live-delivery claim) ──
 inboxRouter.get('/inbox/ops', (req, res) => {

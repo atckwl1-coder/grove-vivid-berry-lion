@@ -59,6 +59,7 @@ export function listPage(actor, convs, killState = { state: 'AUTOMATION_ACTIVE' 
          <input name=confirm placeholder='type RESUME to confirm' required>
          <button>▶ Resume all</button></form>` : '<span class=tag>Only OWNER can resume.</span>'}</div>`
     : `<div class=facts>🟢 AUTOMATION ACTIVE ${actor.role === 'OWNER' ? `
+       <a href="/inbox/session">session status</a>
        <form class=inline method=post action="/inbox/kill/stop">
          <input type=hidden name=csrf value="${esc(csrf)}"><input type=hidden name=actionId value="${actionId()}">
          <input name=reason placeholder="reason (optional)">

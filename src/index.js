@@ -12,6 +12,7 @@ import { initOutbox, deliverToMeta, demoDeliver } from './services/whatsapp.js';
 import { resolveTransport, requestedTransportId } from './sentinel/transport.js';
 import { createSessionAdapter } from './sentinel/session/adapter.js';
 import { sessionInboundHandlers } from './sentinel/session/bindInbound.js';
+import { setSessionRuntime } from './sentinel/session/runtime.js';
 import { handleIncomingMessage } from './services/brain.js';
 import { messagingWindowGuard } from './sentinel/gates.js';
 import { startScheduler } from './workers/scheduler.js';
@@ -69,6 +70,7 @@ const transport = resolveTransport({
   demoDeliver,
   sessionSendFn: sessionAdapter.sendFn,
 });
+setSessionRuntime({ adapter: sessionAdapter, transportId: transport.id });
 const outbox = createOutbox({
   dir: config.outboxDir,
   sendFn: transport.sendFn,
