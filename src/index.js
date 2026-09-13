@@ -9,6 +9,8 @@ import { initAudit, audit } from './sentinel/audit.js';
 import { initIdempotency } from './sentinel/idempotency.js';
 import { createOutbox } from './sentinel/outbox.js';
 import { initOutbox, deliverToMeta, demoDeliver } from './services/whatsapp.js';
+import { resolveTransport, requestedTransportId } from './sentinel/transport.js';
+import { createSessionAdapter } from './sentinel/session/adapter.js';
 import { messagingWindowGuard } from './sentinel/gates.js';
 import { startScheduler } from './workers/scheduler.js';
 import { log } from './utils/logger.js';
@@ -48,9 +50,16 @@ try {
 }
 
 // Durable outbound dispatcher — inject provider + policy guard + kill gate
+const sessionAdapter = createSessionAdapter({ authDir: config.waSessionDir, auditFn: audit });
+const transport = resolveTransport({
+  live: isLive(),
+  deliverToMeta,
+  demoDeliver,
+  sessionSendFn: sessionAdapter.sendFn,
+});
 const outbox = createOutbox({
   dir: config.outboxDir,
-  sendFn: isLive() ? deliverToMeta : demoDeliver,
+  sendFn: transport.sendFn,
   windowGuard: messagingWindowGuard,
   autonomyGuard: (job) => (killswitch.isAutonomousJob(job) ? killswitch.gateForSend(job.payload?.to, { source: job.meta?.source }) : { ok: true }),
   auditFn: audit,
@@ -66,6 +75,12 @@ killswitch.onKillStop(() => outbox.holdAutonomous(killswitch.isAutonomousJob));
 killswitch.onKillResume(() => outbox.releaseHeld());
 outbox.recover(); // §17: crash-interrupted jobs — honestly re-queued as UNCERTAIN
 outbox.start();
+
+if (transport.id === 'session') {
+  sessionAdapter.start().catch((err) => {
+    log.error('session adapter start failed:', err?.message || err);
+  });
+}
 
 // ── CAP-008 wiring: suppression chokepoint + human-send path + SLA clock ──
 waSvc.setSendGuard(conversations.authorizeOutbound); // §5 wall 2 — LLM/UI cannot bypass
@@ -86,11 +101,13 @@ const app = buildApp();
 app.listen(config.port, '0.0.0.0', () => {
   audit('BOOT', {
     mode: isLive() ? 'LIVE' : 'DEMO',
+    transport: transport.id,
+    requestedTransport: requestedTransportId(),
     port: Number(config.port),
     sentinel: 'phase2a',
     signatureEnforcement: Boolean(config.appSecret),
   });
-  log.info(`🌙 NOOR is awake on port ${config.port} — mode: ${isLive() ? 'LIVE' : 'DEMO'} — Sentinel 2A ACTIVE`);
+  log.info(`🌙 NOOR is awake on port ${config.port} — mode: ${isLive() ? 'LIVE' : 'DEMO'} — transport: ${transport.id} — Sentinel 2A ACTIVE`);
   log.info(`🛡️  Signature enforcement: ${config.appSecret ? 'ON' : 'DEMO-OFF'} · Audit: ${config.auditFile}`);
   startScheduler();
 });

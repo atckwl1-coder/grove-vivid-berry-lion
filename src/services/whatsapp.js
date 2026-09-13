@@ -8,6 +8,7 @@ import { markSessionUnavailable } from './humanPaced/sessionHealth.js';
 import { log } from '../utils/logger.js';
 import { redact } from '../sentinel/audit.js';
 import * as firewall from '../sentinel/firewall.js'; // P2: static wiring — no config can disable the boundary
+import { metaSideEffectsAllowed } from '../sentinel/transport.js';
 
 const apiUrl = () => `https://graph.facebook.com/${config.graphVersion}/${config.phoneNumberId}/messages`;
 const headers = () => ({
@@ -162,7 +163,7 @@ export const sendTemplate = (to, name, languageCode = 'ur', components = []) =>
   });
 
 export async function downloadMedia(mediaId) {
-  if (!isLive()) return null;
+  if (!metaSideEffectsAllowed()) return null;
   const { data } = await axios.get(`https://graph.facebook.com/${config.graphVersion}/${mediaId}`, { headers: headers() });
   const file = await axios.get(data.url, { headers: headers(), responseType: 'arraybuffer' });
   return file.data;
@@ -171,7 +172,7 @@ export async function downloadMedia(mediaId) {
 // Read receipts: low-risk, Meta-idempotent side effect — inline is acceptable.
 // Documented gap: not outboxed (loss = harmless blue-tick miss).
 export const markRead = (messageId) => {
-  if (!isLive()) return;
+  if (!metaSideEffectsAllowed()) return;
   axios
     .post(apiUrl(), { messaging_product: 'whatsapp', status: 'read', message_id: messageId }, { headers: headers() })
     .catch(() => {});
@@ -197,7 +198,7 @@ export const typingIndicatorPayload = (messageId) => ({
 });
 
 export async function startTypingPresence(_phone, inboundMessageId) {
-  if (!isLive() || !inboundMessageId) return null; // DEMO: no network, ever
+  if (!metaSideEffectsAllowed() || !inboundMessageId) return null; // DEMO/session: no Meta network
   try {
     const { data } = await axios.post(apiUrl(), typingIndicatorPayload(inboundMessageId), { headers: headers(), timeout: 15000 });
     return data;

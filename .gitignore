@@ -3,3 +3,5 @@ node_modules/
 *.log
 .env
 .p2-stash
+data/wa-session/
+.wa-session/

@@ -323,7 +323,7 @@ test('R16. Reno 16 floor is 186800; 16F floor is 138600; 149999 is not the 16 fl
   verdict('R16 floors', '186800 / 138600 RESOLVED; 149999 not a 16 floor', 'asserted', 'owner file is still the floor authority', 'LIVE dealer-price honouring');
 });
 
-test('T1. no QR/session implementation; D-010 is a decision record', () => {
+test('T1. session library isolated to adapter; default is not session', () => {
   const walk = (d, acc = []) => {
     for (const f of fs.readdirSync(d)) {
       const p = path.join(d, f);
@@ -333,19 +333,26 @@ test('T1. no QR/session implementation; D-010 is a decision record', () => {
     }
     return acc;
   };
+  const allow = path.join(REPO, 'src/sentinel/session/librarySocket.js');
   const srcFiles = walk(path.join(REPO, 'src'));
   for (const f of srcFiles) {
+    if (f === allow) continue;
     const s = fs.readFileSync(f, 'utf8');
     assert.equal(/baileys|whatsapp-web\.js|wppconnect|makeWASocket/i.test(s), false, f);
   }
+  const lib = fs.readFileSync(allow, 'utf8');
+  assert.match(lib, /@whiskeysockets\/baileys/);
+  assert.match(lib, /6\.7\.24/);
   const pkg = JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8'));
-  assert.equal(JSON.stringify(pkg.dependencies || {}).includes('baileys'), false);
+  assert.equal(pkg.dependencies['@whiskeysockets/baileys'], '6.7.24');
   const d010 = fs.readFileSync(path.join(REPO, 'D010_TRANSPORT_PREFLIGHT.md'), 'utf8');
   assert.match(d010, /CURRENT TRANSPORT = Meta Cloud API/);
-  assert.match(d010, /QR \/ SESSION = NOT IMPLEMENTED/);
+  assert.match(d010, /SENTINEL_TRANSPORT=session/);
   assert.match(d010, /Not an implementation/);
   assert.equal(/from ['"].*D010/.test(fs.readFileSync(path.join(REPO, 'src/index.js'), 'utf8')), false);
-  verdict('T1 transport', 'Cloud API current; QR not implemented; D-010 docs-only', 'asserted', 'no new adapter landed in this cycle', 'LIVE Meta onboarding');
+  const idx = fs.readFileSync(path.join(REPO, 'src/index.js'), 'utf8');
+  assert.match(idx, /resolveTransport/);
+  verdict('T1 transport', 'Cloud selectable; session explicit; library isolated to adapter', 'asserted', 'default remains DEMO/Cloud by creds', 'live session still requires operator SENTINEL_TRANSPORT=session');
 });
 
 test('T2. LLM/router cannot call confirmPaidSale', () => {

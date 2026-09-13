@@ -29,6 +29,7 @@ export const config = {
   slaMinutesInHours: Number(process.env.SLA_MINUTES_IN_HOURS || 5),
   insecureDemoAuth: !(process.env.WHATSAPP_TOKEN && process.env.PHONE_NUMBER_ID), // DEMO seeding only
   killFile: process.env.KILL_FILE || './data/killswitch.json',
+  waSessionDir: process.env.WA_SESSION_DIR || './data/wa-session',
   retry: {
     maxAttempts: Number(process.env.RETRY_MAX || 5),
     baseMs: Number(process.env.RETRY_BASE_MS || 1500),

@@ -1,13 +1,13 @@
-# D-010 — TRANSPORT PREFLIGHT (decision record only)
+# D-010 — TRANSPORT PREFLIGHT (decision record + current runtime)
 
-**Status:** DECISION / PREFLIGHT. **Not an implementation.**  
-**Date:** 2026-09-12  
-**Current transport in this repository:** **Meta Cloud API**  
-**QR / session / Baileys / WhatsApp Web automation:** **NOT IMPLEMENTED**  
-**Authorization:** no QR/session code will be written until a later cycle explicitly authorizes a transport change.
+**Status:** DECISION / PREFLIGHT, with M2 adapter present.  
+**Date:** 2026-09-12 (record) / 2026-09-13 (M2 adapter)  
+**CURRENT TRANSPORT = Meta Cloud API** when `SENTINEL_TRANSPORT=cloud` (or unset + LIVE creds).  
+**Default unset + no Meta creds = DEMO.**  
+**QR / session adapter:** implemented under `src/sentinel/session/`, selected only by `SENTINEL_TRANSPORT=session`. Not the default.  
+**Not an implementation** of stealth, dual-send, or unofficial evasion. One send path remains `whatsapp.send()` → P2 firewall → durable outbox → selected adapter.
 
-This record compares options. It does **not** start a new adapter. Sentinel’s one send path remains `whatsapp.send()` → P2 firewall → durable outbox → Cloud API (or DEMO spy).
-
+---
 ---
 
 ## Current installation (fact)
