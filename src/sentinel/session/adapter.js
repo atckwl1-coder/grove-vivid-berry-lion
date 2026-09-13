@@ -94,11 +94,20 @@ export function createSessionAdapter(opts = {}) {
     machine.set('AUTH_REQUIRED', reason);
   }
 
+  function qrPhase() {
+    if (pairingHold) return 'EXPIRED';
+    if (machine.state === 'NEEDS_QR' && qrPayload) return 'ACTIVE';
+    if (machine.state === 'NEEDS_QR') return 'EXPIRED';
+    return 'NONE';
+  }
+
   function publicState() {
+    const phase = qrPhase();
     return {
       state: machine.state,
-      qrAvailable: Boolean(qrPayload),
+      qrAvailable: phase === 'ACTIVE',
       qrSeq,
+      qrPhase: phase,
       creds: credsPresent(authDir),
       corrupted: isCorrupted(authDir),
       pairingHold,
@@ -146,6 +155,12 @@ export function createSessionAdapter(opts = {}) {
     return publicState();
   }
 
+  /** Owner-only: resetAuth + start. Does not delete auth files. */
+  async function retryPairing(actor) {
+    resetAuth(actor);
+    return start({ ownerRetry: true });
+  }
+
   function attach(socket) {
     sock = socket;
     const ev = socket?.ev;
@@ -181,6 +196,7 @@ export function createSessionAdapter(opts = {}) {
           try { if (socket?.end) socket.end(); } catch { /* refuse live use */ }
         } else {
           forgetQr();
+          pairingHold = false;
           reconnectAttempts = 0;
           sock = socket;
           machine.set('CONNECTED', 'socket open');
@@ -361,6 +377,7 @@ export function createSessionAdapter(opts = {}) {
     markRead,
     takeQr,
     resetAuth,
+    retryPairing,
     health,
     getState: publicState,
     get machineState() { return machine.state; },

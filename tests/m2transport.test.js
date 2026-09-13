@@ -468,12 +468,15 @@ test('M2QR.1 NEEDS_QR + 408 retains the SAME pairing socket (no reconnect)', asy
   const first = current;
   current.ev.emit('connection.update', { qr: 'PAIR-QR-1' });
   assert.equal(adapter.getState().state, 'NEEDS_QR');
+  assert.equal(adapter.getState().qrPhase, 'ACTIVE');
+  assert.equal(adapter.getState().qrAvailable, true);
   assert.equal(opens, 1);
   current.ev.emit('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 408 } } } });
   await new Promise((r) => setTimeout(r, 50));
   assert.equal(adapter.getState().state, 'NEEDS_QR');
   assert.equal(adapter.getState().qrAvailable, false);
   assert.equal(adapter.getState().pairingHold, true);
+  assert.equal(adapter.getState().qrPhase, 'EXPIRED');
   assert.equal(adapter.takeQr({ role: 'OWNER' }), null);
   assert.equal(opens, 1, '408 during NEEDS_QR must not open a replacement socket');
   assert.equal(current, first);
@@ -630,6 +633,36 @@ test('M2QR.7 owner retry after pairing hold may create a new socket; creds not d
   assert.equal(adapter.getState().state, 'NEEDS_QR');
   assert.equal(opens, 2, 'owner resetAuth+start may open a new pairing socket');
   assert.equal(fs.readFileSync(credsPath, 'utf8'), before);
+});
+
+test('M2QR.8 CONNECTED and AUTH_REQUIRED never expose QR; retryPairing is owner-only', async () => {
+  let opens = 0;
+  let current;
+  const adapter = createSessionAdapter({
+    authDir: process.env.WA_SESSION_DIR,
+    openSocket: async () => {
+      opens += 1;
+      current = mockSocket();
+      return current;
+    },
+  });
+  await adapter.start();
+  current.ev.emit('connection.update', { connection: 'open' });
+  assert.equal(adapter.getState().state, 'CONNECTED');
+  assert.equal(adapter.getState().qrAvailable, false);
+  assert.equal(adapter.getState().qrPhase, 'NONE');
+  current.ev.emit('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 401 } } } });
+  assert.equal(adapter.getState().state, 'AUTH_REQUIRED');
+  assert.equal(adapter.getState().qrAvailable, false);
+  assert.equal(adapter.getState().qrPhase, 'NONE');
+  current.ev.emit('connection.update', { qr: 'NOPE' });
+  assert.equal(adapter.getState().qrAvailable, false);
+  await assert.rejects(() => adapter.retryPairing({ role: 'STAFF' }), (e) => e.code === 'OWNER_ONLY');
+  await adapter.retryPairing({ role: 'OWNER' });
+  current.ev.emit('connection.update', { qr: 'AFTER-RETRY' });
+  assert.equal(adapter.getState().qrPhase, 'ACTIVE');
+  assert.equal(adapter.getState().qrAvailable, true);
+  assert.ok(opens >= 2);
 });
 
 test('ISO. shipped owner files were not mutated', () => {

@@ -57,12 +57,26 @@ export function buildApp() {
       state: snap.state,
       qrAvailable: Boolean(snap.qrAvailable),
       qrSeq: snap.qrSeq || 0,
+      qrPhase: snap.qrPhase || 'NONE',
       pairingHold: Boolean(snap.pairingHold),
       catchup: snap.catchup || 'PENDING',
       receivedPendingNotifications: Boolean(snap.receivedPendingNotifications),
       creds: Boolean(snap.creds),
       transport: snap.transport,
     });
+  });
+
+  app.post('/session-retry', async (_req, res) => {
+    if (process.env.SENTINEL_PREVIEW_MONITOR !== '1') return res.status(404).end();
+    const adapter = getSessionRuntime().adapter;
+    if (!adapter || typeof adapter.retryPairing !== 'function') return res.status(409).send('NO_ADAPTER');
+    try {
+      await adapter.retryPairing({ role: 'OWNER' });
+    } catch (e) {
+      return res.status(e.code === 'OWNER_ONLY' ? 403 : 500).type('text').send(String(e.code || e.message || 'RETRY_FAILED').slice(0, 80));
+    }
+    res.setHeader('Cache-Control', 'no-store');
+    return res.redirect(303, '/');
   });
 
   app.get('/health', (_req, res) => res.json({ ok: true }));

@@ -22,6 +22,7 @@ export function publicSessionStatus() {
     state: snap.state,
     qrAvailable: Boolean(snap.qrAvailable),
     qrSeq: snap.qrSeq || 0,
+    qrPhase: snap.qrPhase || (snap.qrAvailable ? 'ACTIVE' : (snap.pairingHold ? 'EXPIRED' : 'NONE')),
     creds: Boolean(snap.creds),
     pairingHold: Boolean(snap.pairingHold),
     catchup: inbound.catchup || 'PENDING',

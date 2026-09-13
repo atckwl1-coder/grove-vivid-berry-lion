@@ -132,8 +132,11 @@ test('M2F.5 preview has no full-page 4s reload and a stable QR img src', async (
     assert.match(html, /id="sess-qr"/);
     assert.match(html, /data-src="\/session-qr\.png"/);
     assert.match(html, /src="\/session-qr\.png"/);
-    assert.match(html, /session-status\.json/);
-    assert.equal(html.includes('SECRET-M2-QR'), false);
+    assert.match(html, /id="sess-qr-phase" class="qr-active">QR ACTIVE/);
+    assert.equal(/id="sess-qr-phase" class="qr-expired"/.test(html), false);
+    assert.match(html, /id="sess-qr-flag">yes/);
+    assert.match(html, /Scan this QR now/);
+    assert.match(html, /RETRY PAIRING/);
   } finally {
     if (prev === undefined) delete process.env.SENTINEL_PREVIEW_MONITOR;
     else process.env.SENTINEL_PREVIEW_MONITOR = prev;
@@ -149,17 +152,29 @@ test('M2F.6 session-status.json has no QR payload; PNG 404 after pairing-hold', 
     assert.equal(st.status, 200);
     assert.equal(body.state, 'NEEDS_QR');
     assert.equal(body.qrAvailable, true);
+    assert.equal(body.qrPhase, 'ACTIVE');
+    assert.equal(body.qrAvailable, true);
     assert.equal(JSON.stringify(body).includes('SECRET-M2-QR'), false);
     sock.ev.emit('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 408 } } } });
     const st2 = await fetch(base + '/session-status.json');
     const body2 = await st2.json();
     assert.equal(body2.qrAvailable, false);
+    assert.equal(body2.qrPhase, 'EXPIRED');
     assert.equal(body2.pairingHold, true);
+    assert.equal(body2.qrAvailable && /QR expired/.test(JSON.stringify(body2)), false);
     const png = await fetch(base + '/session-qr.png');
     assert.equal(png.status, 404);
     const html = await (await fetch(base + '/')).text();
-    assert.match(html, /retry required|QR available: <b>no<\/b>/i);
-    assert.equal(html.includes('SECRET-M2-QR'), false);
+    assert.match(html, /QR EXPIRED/);
+    assert.equal(/QR available<\/th><td id="sess-qr-flag">yes/.test(html), false);
+    assert.match(html, /RETRY PAIRING/);
+    const retry = await fetch(base + '/session-retry', { method: 'POST', redirect: 'manual' });
+    assert.ok([302, 303].includes(retry.status));
+    sock.ev.emit('connection.update', { qr: 'SECRET-M2-QR-2' });
+    const st3 = await (await fetch(base + '/session-status.json')).json();
+    assert.equal(st3.qrPhase, 'ACTIVE');
+    assert.equal(st3.qrAvailable, true);
+    assert.equal(JSON.stringify(st3).includes('SECRET-M2-QR'), false);
   } finally {
     if (prev === undefined) delete process.env.SENTINEL_PREVIEW_MONITOR;
     else process.env.SENTINEL_PREVIEW_MONITOR = prev;

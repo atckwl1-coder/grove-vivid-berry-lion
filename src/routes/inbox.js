@@ -17,6 +17,7 @@ import { ownerSnapshot } from '../services/ops.js';
 import { opsPage } from '../inbox/opsViews.js';
 import { b2Preflight } from '../services/b2preflight.js';
 import { getSessionRuntime, publicSessionStatus } from '../sentinel/session/runtime.js';
+import { renderSessionMonitor } from '../inbox/sessionMonitor.js';
 
 export const inboxRouter = express.Router();
 
@@ -151,14 +152,21 @@ inboxRouter.get('/inbox/session', (req, res) => {
   if (!requireOwner(actor, req, res)) return;
   const status = publicSessionStatus();
   if (wantsJson(req)) return res.json({ ok: true, session: status });
-  const qr = status.qrAvailable
-    ? `<p>QR available (seq ${status.qrSeq}). Scan from this authenticated page only.</p><img alt="pairing QR" src="/inbox/session/qr">`
-    : `<p>No QR waiting. State: ${status.state}</p>`;
-  return res.type('html').send(`<!doctype html><meta charset=utf-8><title>Session</title>
-    <h2>WhatsApp session</h2>
-    <p>transport=${status.transport} state=${status.state} creds=${status.creds}</p>
-    ${qr}
-    <p><a href="/inbox">back</a></p>`);
+  return res.type('html').send(renderSessionMonitor({ showQr: true, refresh: false, csrf: actor.csrf, retryUrl: '/inbox/session/retry' }));
+});
+
+inboxRouter.post('/inbox/session/retry', async (req, res) => {
+  const actor = requireAuth(req, res); if (!actor) return;
+  if (!requireOwner(actor, req, res)) return;
+  if (!requireCsrf(actor, req, res)) return;
+  const adapter = getSessionRuntime().adapter;
+  if (!adapter || typeof adapter.retryPairing !== 'function') return res.status(409).send('NO_ADAPTER');
+  try {
+    await adapter.retryPairing(actor);
+  } catch (e) {
+    return res.status(e.code === 'OWNER_ONLY' ? 403 : 500).send(String(e.code || 'RETRY_FAILED').slice(0, 80));
+  }
+  return res.redirect(303, '/inbox/session');
 });
 
 inboxRouter.get('/inbox/session/qr', async (req, res) => {
