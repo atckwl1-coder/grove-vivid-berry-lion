@@ -1,6 +1,6 @@
 # SENTINEL CONTINUATION STATE
 
-A fresh AI agent must read this file first, then `docs/evidence/M2_FREEZE.md`, then inspect git, then run the existing suite before modifying code.
+A fresh AI agent must read this file first, then `docs/evidence/LIVE_CORE_BASELINE.md`, then `docs/evidence/M2_FREEZE.md`, then inspect git, then run the existing suite before modifying code.
 
 This file is a preservation checkpoint. It is **not** production certification.
 
@@ -8,59 +8,61 @@ This file is a preservation checkpoint. It is **not** production certification.
 CURRENT CHECKPOINT
 ------------------------------------------------------------
 
+LIVE CORE CHECKPOINT (dedicated TEST number)
 M2 COMPLETE
 V1-5.1 COMPLETE
 Current state = DEMO/PILOT
 
 ------------------------------------------------------------
-LAST ACCEPTED M2 COMMIT
+LAST LIVE-TESTED APPLICATION COMMIT
 ------------------------------------------------------------
 
-399afde156098337b141a4015e2c6eadc0555abb
-`fix: enforce single active pairing socket`
+8e7cb2be5e73c67e11c53776d89a24c04430914b
+`fix: resolve session LID identity and pin library handshake`
 
-At freeze: checked out as HEAD of `feature/m2-live-blocker-fix`.
-Not merged to `main` (`main` = `64fd32a` at freeze).
+This freeze commit records that live proof. It does not change brain, firewall,
+outbox, kill, CAP-008, or session inbound semantics.
 
 ------------------------------------------------------------
 LAST TEST RESULT
 ------------------------------------------------------------
 
-432/432 ×2 consecutive processes (`node scripts/run-tests.mjs`)
+435/435 ×2 consecutive processes (`node scripts/run-tests.mjs`, 2026-09-14)
 
 ------------------------------------------------------------
-WHAT IS FROZEN
+WHAT IS LIVE-PROVEN (TEST number only)
 ------------------------------------------------------------
 
-- M2 session transport adapter (defined scope: companion + generation guard + retry serialization + CONNECTED/NEEDS_QR reuse)
-- V1-5.1 controlled pilot readiness (staff paid confirmation, monetary normalize, cross-SKU protection, D-010 record)
-- V1-6 product layer and post-freeze staff product already in history
-- P2 Action Firewall
-- CAP-055 Kill Switch
-- CAP-008 Human Fallback
-- Outbox
-- Idempotency
-- Session inbound protections
-- Number Firewall
-- Catalog authority
-- Negotiation floor controls
-- Owner source-of-truth files (`products.json`, `negotiation-rules.json`, `sales-skills.json`)
+- session restore to CONNECTED without QR
+- restart restore
+- real 1:1 inbound (notify, customer PN, not @lid)
+- durable `sess:<provider-id>` claim taken once
+- existing Sentinel brain
+- P2 firewall ALLOW → durable outbox → session adapter accept (job SENT)
+- fromMe echo skipped
+- SENT/SUBMITTED/outbox SENT is **not** customer DELIVERED
+
+Evidence: `evidence/m2-live-core-2026-09-14.txt`
 
 ------------------------------------------------------------
 WHAT IS NOT PROVEN
 ------------------------------------------------------------
 
-- real live WhatsApp operation
+- receivedPendingNotifications / CAUGHT_UP
+- network-outage catch-up / multiple outage messages
+- CAP-008 live staff claim + HUMAN reply
+- kill switch ON/OFF around a live customer turn
+- duplicate live replay of the same inbound
+- phone-UI DELIVERED/READ
+- store / customer-facing number
 - production readiness
-- live delivery behavior (never call SUBMITTED/SENT “DELIVERED”)
 - B-2 live Meta smoke (BLOCKED / NOT RUN)
 - ban-proof / official WhatsApp automation (do not write these words)
-- other documented UNKNOWN/PARTIAL KPIs
 
-Owner-file fact vs V1-5.1 narrative:
+Owner-file fact:
 
 - Reno 16 floor = **186800 RESOLVED** (current owner file)
-- Reno 16F: V1-5.1 freeze recorded **UNRESOLVED**; **current owner file** on this tree is **138600 RESOLVED**. Do not revert without new owner instruction.
+- Reno 16F floor = **138600 RESOLVED** (current owner file)
 
 ------------------------------------------------------------
 KNOWN NON-BLOCKING M2 CONCERNS
@@ -94,30 +96,23 @@ DO NOT REOPEN
 NEXT INTENDED DEVELOPMENT DIRECTION
 ------------------------------------------------------------
 
-After this preservation checkpoint, the next development phase is:
+Live catch-up (RPN / CAUGHT_UP) remains the unfinished live-core item.
+
+After live core is accepted, the next product phase remains:
 
 RAPID PRODUCT CAPABILITY INTEGRATION
 
-Priority areas:
-
-1. Lead Qualification
-2. Sales / Conversation Intelligence
-3. Customer CRM / Memory
-4. Customer Care
-5. Staff Operations
-6. Owner Intelligence
-
-Use multiple specialized agents where safe.
-
-Do NOT start these features from this preservation commit.
+Do not start store-number activation from this checkpoint.
 
 ------------------------------------------------------------
 TRANSPORT BOUNDARY
 ------------------------------------------------------------
 
 M2 TRANSPORT ADAPTER: IMPLEMENTED / TESTED
-
-REAL WHATSAPP LIVE OPERATION: NOT PROVEN BY THIS M2 TEST SUITE
+DEDICATED TEST NUMBER 1:1: LIVE-PROVEN
+CAUGHT_UP / OUTAGE CATCH-UP: NOT-PROVEN
+STORE NUMBER: NOT USED
+REAL PRODUCTION DELIVERY: NOT PROVEN
 
 Preserve the current selector:
 
@@ -125,7 +120,7 @@ Preserve the current selector:
 - Cloud still works
 - session requires explicit selection
 - do not silently replace Cloud as default
-- do not treat M2 as permission to bypass P2 / kill / outbox / CAP-008
+- do not treat this checkpoint as permission to bypass P2 / kill / outbox / CAP-008
 
 ------------------------------------------------------------
 RESUME INSTRUCTION
@@ -134,9 +129,9 @@ RESUME INSTRUCTION
 A future agent must:
 
 1. Read `SENTINEL_CONTINUATION_STATE.md`
-2. Read `docs/evidence/M2_FREEZE.md`
-3. Inspect git status/log
-4. Verify current HEAD
-5. Run the existing suite before modifying code
-6. Continue from the frozen checkpoint
-7. Never assume this file means production readiness
+2. Read `docs/evidence/LIVE_CORE_BASELINE.md`
+3. Read `docs/evidence/M2_FREEZE.md`
+4. Inspect git status/log
+5. Verify current HEAD
+6. Run the existing suite before modifying code
+7. Never assume this file means production readiness or CAUGHT_UP

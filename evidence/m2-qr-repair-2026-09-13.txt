@@ -1,0 +1,8 @@
+M2 QR re-pair evidence (secret-free)
+Date: 2026-09-13
+Rejected companion: Baileys 401 loggedOut
+Rejected creds preserved at: /tmp/sentinel-m2-evidence-20260913-repair/wa-session-rejected
+Rejected creds sha16: 17f40330f9baec95 size 1872 (not deleted)
+New pairing auth dir: /tmp/sentinel-m2-repair/wa-session (empty at start)
+QR payload / keys / full numbers: omitted.
+Store customer number: not used.

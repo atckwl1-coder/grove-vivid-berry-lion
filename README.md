@@ -10,12 +10,12 @@ The LLM is **not** price, policy, or security authority. DEBT-07: model-generate
 
 ## What it is not
 
-- Not a live WhatsApp product (DEMO unless Cloud API tokens are set; live behavior unproven)
+- Not a live production WhatsApp product (DEMO remains default; Cloud needs tokens; session needs explicit selection)
 - Not a reservation/token system (honestly refused since V1-0)
 - Not a marketing engine (governor exists but is unwired; firewall denies `MARKETING.SEND`)
 - Not STT/vision (stubs; photo/voice copy is honest)
 - Not a payment gateway (a customer saying “I'll take this” is stated intent; follow-up requires staff-confirmed **paid** via the CAP-008 inbox “Mark as PAID” action — not a PSP)
-- Not QR/session WhatsApp as a proven live product (M2 adapter is implemented/tested; live operation is **not** proven; DEMO remains default)
+- Not QR/session WhatsApp as a store-number product (M2 adapter is implemented; dedicated TEST-number 1:1 is LIVE-PROVEN; catch-up/CAUGHT_UP is NOT-PROVEN; DEMO remains default)
 
 ## Layout
 
@@ -63,4 +63,4 @@ Owner catalog ritual: `node scripts/verify-catalog.mjs --verify` (24h TTL; stale
 
 ## Status
 
-See `SENTINEL_CONTINUATION_STATE.md`, `docs/evidence/M2_FREEZE.md`, `STATE.md`, `PROGRESS.md`, and `HANDOFF.md`. **M2 = COMPLETE/FROZEN** at `399afde` (432/432 ×2). **V1-5.1 = COMPLETE/FROZEN.** Overall = **DEMO/PILOT**. This is **not** a live Meta smoke test and **not** proven live session delivery. Catalog prices are **STALE** until the owner re-verifies. **B-2 is BLOCKED / NOT RUN.** Nothing is `VERIFIED_PRODUCTION`. `SENT`/`SUBMITTED` ≠ `DELIVERED`.
+See `SENTINEL_CONTINUATION_STATE.md`, `docs/evidence/LIVE_CORE_BASELINE.md`, `docs/evidence/M2_FREEZE.md`, `STATE.md`, `PROGRESS.md`, and `HANDOFF.md`. **LIVE CORE CHECKPOINT** at live-tested `8e7cb2be` (TEST number 1:1 LIVE-PROVEN; CAUGHT_UP NOT-PROVEN). **M2 = COMPLETE.** **V1-5.1 = COMPLETE/FROZEN.** Suite **435/435 ×2**. Overall = **DEMO/PILOT**. Catalog prices are **STALE** until the owner re-verifies. **B-2 is BLOCKED / NOT RUN.** Nothing is `VERIFIED_PRODUCTION`. `SENT`/`SUBMITTED` ≠ `DELIVERED`. `CONNECTED` ≠ `CAUGHT_UP`.

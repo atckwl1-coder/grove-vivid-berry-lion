@@ -1,0 +1,98 @@
+M2 LIVE CORE — secret-free evidence
+Date: 2026-09-14
+Branch: feature/m2-live-blocker-fix
+HEAD (live-tested code): 8e7cb2be5e73c67e11c53776d89a24c04430914b
+Base main at start of this branch: 64fd32a2ba92c8156100267a94ba70fcbcecb6c2
+QR payloads, creds, full JIDs, Signal keys, message bodies: omitted.
+
+THIS IS NOT VERIFIED_PRODUCTION. Not a store-number claim. Not CAUGHT_UP.
+SENT / SUBMITTED / outbox SENT ≠ customer DELIVERED.
+CONNECTED ≠ CAUGHT_UP. Dedicated TEST number only.
+
+===============================================================================
+CODE UNDER TEST
+===============================================================================
+
+Live-tested code is exactly 8e7cb2be5e73c67e11c53776d89a24c04430914b
+(fix: resolve session LID identity and pin library handshake).
+
+That commit:
+- @lid is never treated as a phone; SKIP_LID_UNRESOLVED unless senderPn/participantPn
+  resolves to a PN
+- library handshake uses Baileys 6.7.24 default (no fetchLatestBaileysVersion)
+- maskedMeIdentity export is last-4 only
+
+No production-code change in this freeze commit beyond declaring the already-imported
+`qrcode` dependency and documentation/evidence.
+
+===============================================================================
+SUITE
+===============================================================================
+
+435/435 ×2  (node scripts/run-tests.mjs, two consecutive processes, 2026-09-14)
+
+===============================================================================
+LIVE PROCESS (dedicated TEST number; store number unused)
+===============================================================================
+
+Restart after LID/handshake fix:
+  STARTING → restore existing creds → CONNECTED
+  qrPhase=NONE qrAvailable=false creds=true transport=session
+  kill=AUTOMATION_ACTIVE
+  receivedPendingNotifications=false
+  catchup=PENDING  (never labeled CAUGHT_UP)
+
+===============================================================================
+LIVE 1:1 FROM SECOND WHATSAPP (2026-09-13T23:50:52Z UTC)
+===============================================================================
+
+Owner sent ONE plain 1:1 text from a second WhatsApp account to the TEST number.
+
+Trace (audit + idem + outbox; bodies omitted):
+
+  23:50:52.918Z  EVENT_RECEIVED
+                 provider id A58F189D96497E9F43F870255118B5E7
+                 path=session upsertType=notify catchup=PENDING
+                 from = customer PN (PK mobile, masked) — not @lid
+  23:50:52.932Z  composition_started / typing_started
+  23:50:53.015Z  composition_completed / typing_stopped
+  23:50:53.016Z  FIREWALL_DECISION ALLOW ALL_STAGES_PASS EXECUTION
+  23:50:53.017Z  OUTBOX_QUEUED job-mu0gw4m0-53fb11ef source=AI
+  23:50:53.018Z  final_send_dispatched
+  23:50:53.018Z  EVENT_PROCESSED same provider id (exactly one)
+  23:50:55.965Z  OUTBOX_SENT job-mu0gw4m0-53fb11ef
+  23:50:56.582Z  SESSION_INBOUND_SKIP append SKIP_FROM_ME (reply echo)
+
+Durable claim: idem file sess_A58F189D96497E9F43F870255118B5E7 present once.
+Events for that provider id: EVENT_RECEIVED + EVENT_PROCESSED only (no duplicate).
+Outbox job status SENT (adapter accepted). providerResult is an accept token.
+Never labeled DELIVERED. No phone-UI delivery receipt recorded.
+
+===============================================================================
+VERDICTS
+===============================================================================
+
+Session restore CONNECTED (no QR this boot)           LIVE-PROVEN
+Restart restore                                       LIVE-PROVEN
+Live 1:1 inbound (real customer PN, notify)           LIVE-PROVEN
+Durable session claim sess:<provider-id>              LIVE-PROVEN
+Existing brain processing                             LIVE-PROVEN
+Firewall ALLOW → outbox queue → session send accept   LIVE-PROVEN
+Outbound honesty (SENT ≠ DELIVERED)                   LIVE-PROVEN
+fromMe echo ignored (SKIP_FROM_ME)                    LIVE-PROVEN
+Cloud/session isolation this process                  LIVE-PROVEN (no Meta tokens)
+RPN / CAUGHT_UP / outage catch-up                     NOT-PROVEN
+CAP-008 live human fallback                           NOT-PROVEN
+Kill switch around a live customer turn               NOT-PROVEN
+Multiple outage messages                              NOT-PROVEN
+Duplicate live replay of the same inbound             NOT-PROVEN (this turn had one notify)
+Store / customer-facing number                        NOT USED
+
+===============================================================================
+OVERALL
+===============================================================================
+
+LIVE CORE CHECKPOINT — dedicated TEST number 1:1 path proven.
+Not PILOT-READY for the store number.
+Not VERIFIED_PRODUCTION.
+Catch-up remains NOT-PROVEN.

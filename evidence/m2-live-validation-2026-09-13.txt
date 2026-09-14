@@ -1,0 +1,132 @@
+M2 LIVE TEST-NUMBER VALIDATION — secret-free evidence
+Date: 2026-09-13 (UTC run ~13:33–13:36)
+Main: 64fd32a2ba92c8156100267a94ba70fcbcecb6c2
+Transport env: SENTINEL_TRANSPORT=session (explicit; code default unchanged)
+Test number: dedicated already-paired M0 session (creds size 1870 bytes). Store customer-facing number NOT used.
+QR payloads, pairing codes, JIDs, cookies, CSRF, session tokens, signal keys: OMITTED.
+
+Kill switch was PRE-SET AUTOMATION_STOPPED before boot so restore catch-up could not autonomously reply.
+Process stopped with SIGTERM at end of this run. No logout / no credential reset.
+
+THIS IS NOT VERIFIED_PRODUCTION.
+SENT/SUBMITTED ≠ DELIVERED. CONNECTED ≠ CAUGHT_UP. Adapter-accepted ≠ phone UI observed.
+
+===============================================================================
+WHAT WAS RUN
+===============================================================================
+
+1. Isolated runtime under /tmp (not production data/). Copied M0 multi-file auth
+   into WA_SESSION_DIR. Harness logs excluded. No Meta tokens set.
+2. Boot: node src/index.js with SENTINEL_TRANSPORT=session.
+3. Owner JSON /inbox/session after cookie login.
+4. Process SIGTERM + restart with same WA_SESSION_DIR.
+5. SIGTERM again. Creds still 1870 bytes. No QR event in audit.
+
+NOT RUN (requires a second WhatsApp account physically sending, and/or NIC unplug):
+- planted live inbound text
+- one autonomous reply to that inbound
+- CAP-008 staff claim + HUMAN reply receipt on phone
+- kill-switch ON/OFF around a real customer turn
+- network outage with planted messages then catch-up
+- multiple outage messages
+
+===============================================================================
+OBSERVED (audit + owner session JSON; no secrets)
+===============================================================================
+
+Boot 1  2026-09-13T13:33:54Z
+  SESSION_TRANSPORT STARTING → CONNECTING reason=restore existing creds
+  BOOT transport=session requestedTransport=session
+  SESSION_TRANSPORT CONNECTED reason=socket open   (13:33:56.793Z)
+  owner session: state=CONNECTED qrAvailable=false qrSeq=0 creds=true
+                 health.available=true
+  SESSION_QR events: 0
+
+Catch-up upserts (boot 1):
+  SESSION_INBOUND_SKIP SKIP_NON_CUSTOMER ×9
+  SESSION_INBOUND_SKIP SKIP_FROM_ME ×5
+  durable sess: claims: 0
+  outbox queued/sending/sent/dlq: 0/0/0/0
+  receivedPendingNotifications: false in all SESSION_SOCKET snapshots
+  catchup: PENDING through the window (never CAUGHT_UP in audit)
+
+Unauth /inbox/session → HTTP 401
+GET /webhook → HTTP 403 (Cloud verify path still mounted; no Meta creds)
+
+Restart  2026-09-13T13:36:04Z
+  STARTING → CONNECTING restore existing creds → CONNECTED (13:36:06.027Z)
+  owner session: CONNECTED qrAvailable=false qrSeq=0 creds=true
+  SESSION_QR events still 0
+  new SESSION_INBOUND_SKIP after restart: 0
+  idem files still 0
+  outbox still empty
+  kill still AUTOMATION_STOPPED (pre-set; not flipped this run)
+
+Library stderr/stdout: Baileys printed a Signal session dump
+  ("Closing open session in favor of incoming prekey bundle" plus key buffers).
+  That material is NOT copied here. silentLogger did not suppress it.
+
+===============================================================================
+VERDICTS
+===============================================================================
+
+Session restore (no QR, CONNECTED, creds intact)     LIVE-PROVEN
+Owner session health (CONNECTED, qrSeq=0, no QR)     LIVE-PROVEN
+Live inbound (second WhatsApp text → provider id)    NOT-PROVEN
+Brain processing of a customer turn                  NOT-PROVEN
+Autonomous outbound path to WhatsApp                 NOT-PROVEN
+Delivery honesty (would record SUBMITTED not DELIVERED)  NOT-PROVEN (no send)
+Human fallback (CAP-008 claim → HUMAN send)          NOT-PROVEN
+Kill switch blocks autonomous live send              NOT-PROVEN (no send attempted;
+                                                     state was STOPPED; outbox empty)
+Kill switch HUMAN-while-stopped                      NOT-PROVEN
+Kill resume + autonomous resume                      NOT-PROVEN (not resumed on purpose)
+Restart restore / no QR                              LIVE-PROVEN
+Restart duplicate processing / duplicate reply       LIVE-PROVEN empty:
+                                                     no claims, no outbox, no second skip burst
+Network outage catch-up (planted message)            NOT-PROVEN
+Multiple outage messages                             NOT-PROVEN
+CAUGHT_UP / RPN on live socket                       NOT-PROVEN (RPN never true in audit)
+Duplicate protection under live replay               NOT-PROVEN (no customer claim ids)
+Cloud/session isolation                              LIVE-PROVEN for this process:
+                                                     no Meta tokens; BOOT transport=session;
+                                                     code default is not session;
+                                                     no dual sendFn; outbox empty
+QR / auth safety                                     LIVE-PROVEN this run:
+                                                     no logout, no QR, creds size unchanged
+
+===============================================================================
+BLOCKING FOR CONTROLLED PILOT
+===============================================================================
+
+1. Customer inbound/outbound on the test number was not executed.
+   Cannot authorize a pilot from restore-only evidence.
+
+2. receivedPendingNotifications / CAUGHT_UP never appeared in live audit
+   while CONNECTED. Catch-up gate therefore stayed PENDING. Code-tested,
+   not live-proven. Do not treat this as "catch-up works on WhatsApp".
+
+3. Library leaked Signal key material to process stdout/stderr.
+   Not a pairing failure. Must not ship those logs. No code change this run
+   (STOP-before-fix rule). Needs explicit authorization to wrap/redirect.
+
+Non-blocking:
+- Cloud webhook route remains mounted (403 without verify token). No Cloud send.
+- qrcode PNG dependency still optional (not exercised; no QR).
+- Kill was held STOPPED by design for restore; that is not a kill-path proof.
+
+Session transport ready for controlled customer-facing pilot: NO.
+
+===============================================================================
+OVERALL
+===============================================================================
+
+NOT-PROVEN
+
+Restore/reconnect of the existing test-number session through M2 Sentinel
+is LIVE-PROVEN. The required live customer path (inbound → brain → firewall
+→ outbox → session send → phone, plus kill/human/outage catch-up) was not
+run because a second WhatsApp send was not available in this environment.
+
+No production default changed. No store number used. No merge/push/tag.
+No src/ modification.
